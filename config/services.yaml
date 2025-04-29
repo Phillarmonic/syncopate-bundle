@@ -25,11 +25,11 @@ services:
     syncopate_retry_strategy:
         class: Symfony\Component\HttpClient\Retry\GenericRetryStrategy
         arguments:
-            $delayMs: '%phillarmonic_syncopate.retry_delay%'
-            $multiplier: 2
-            $maxDelayMs: 60000
-            $httpCodes: [0, 423, 425, 429, 500, 502, 503, 504, 507, 510]
-            $statusCodes: [0, 2, 3]
+            - '%phillarmonic_syncopate.retry_delay%'  # $delayMs
+            - 2                                        # $multiplier
+            - 60000                                    # $maxDelayMs
+            - [0, 423, 425, 429, 500, 502, 503, 504, 507, 510]  # $statusCodes
+            - [0, 2, 3]                                          # $methodsToRetry
 
     # Entity type registry service
     Phillarmonic\SyncopateBundle\Service\EntityTypeRegistry:
