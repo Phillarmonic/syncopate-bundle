@@ -1,5 +1,5 @@
 {
-    "name": "philharmonic/syncopate-bundle",
+    "name": "phillarmonic/syncopate-bundle",
     "description": "Symfony bundle for integrating with SyncopateDB",
     "type": "symfony-bundle",
     "version": "1.0.0",
