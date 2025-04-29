@@ -58,3 +58,7 @@ services:
             $syncopateService: '@Phillarmonic\SyncopateBundle\Service\SyncopateService'
             $entityMapper: '@Phillarmonic\SyncopateBundle\Mapper\EntityMapper'
         public: true
+
+    Phillarmonic\SyncopateBundle\Command\RegisterEntityTypesCommand:
+        tags:
+            - { name: console.command }
