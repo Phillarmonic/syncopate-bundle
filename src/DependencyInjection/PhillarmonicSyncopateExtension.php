@@ -1,6 +1,6 @@
 <?php
 
-namespace Philharmonic\SyncopateBundle\DependencyInjection;
+namespace Phillarmonic\SyncopateBundle\DependencyInjection;
 
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;

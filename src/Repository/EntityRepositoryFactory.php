@@ -1,9 +1,9 @@
 <?php
 
-namespace Philharmonic\SyncopateBundle\Repository;
+namespace Phillarmonic\SyncopateBundle\Repository;
 
-use Philharmonic\SyncopateBundle\Mapper\EntityMapper;
-use Philharmonic\SyncopateBundle\Service\SyncopateService;
+use Phillarmonic\SyncopateBundle\Mapper\EntityMapper;
+use Phillarmonic\SyncopateBundle\Service\SyncopateService;
 
 class EntityRepositoryFactory
 {

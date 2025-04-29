@@ -1,6 +1,6 @@
 <?php
 
-namespace Philharmonic\SyncopateBundle\Model;
+namespace Phillarmonic\SyncopateBundle\Model;
 
 class FieldDefinition
 {

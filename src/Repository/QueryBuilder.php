@@ -1,10 +1,10 @@
 <?php
 
-namespace Philharmonic\SyncopateBundle\Repository;
+namespace Phillarmonic\SyncopateBundle\Repository;
 
-use Philharmonic\SyncopateBundle\Model\QueryFilter;
-use Philharmonic\SyncopateBundle\Model\QueryOptions;
-use Philharmonic\SyncopateBundle\Service\SyncopateService;
+use Phillarmonic\SyncopateBundle\Model\QueryFilter;
+use Phillarmonic\SyncopateBundle\Model\QueryOptions;
+use Phillarmonic\SyncopateBundle\Service\SyncopateService;
 
 class QueryBuilder
 {

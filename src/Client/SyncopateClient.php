@@ -1,8 +1,8 @@
 <?php
 
-namespace Philharmonic\SyncopateBundle\Client;
+namespace Phillarmonic\SyncopateBundle\Client;
 
-use Philharmonic\SyncopateBundle\Exception\SyncopateApiException;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateApiException;
 use Symfony\Component\HttpClient\Exception\ClientException;
 use Symfony\Component\HttpClient\Exception\ServerException;
 use Symfony\Contracts\HttpClient\HttpClientInterface;

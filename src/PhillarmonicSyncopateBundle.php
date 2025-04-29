@@ -1,8 +1,8 @@
 <?php
 
-namespace Philharmonic\SyncopateBundle;
+namespace Phillarmonic\SyncopateBundle;
 
-use Philharmonic\SyncopateBundle\DependencyInjection\PhillarmonicSyncopateExtension;
+use Phillarmonic\SyncopateBundle\DependencyInjection\PhillarmonicSyncopateExtension;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\ExtensionInterface;
 use Symfony\Component\HttpKernel\Bundle\Bundle;

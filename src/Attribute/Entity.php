@@ -1,6 +1,6 @@
 <?php
 
-namespace Philharmonic\SyncopateBundle\Attribute;
+namespace Phillarmonic\SyncopateBundle\Attribute;
 
 use Attribute;
 

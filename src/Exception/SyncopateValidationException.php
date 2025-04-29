@@ -1,6 +1,6 @@
 <?php
 
-namespace Philharmonic\SyncopateBundle\Exception;
+namespace Phillarmonic\SyncopateBundle\Exception;
 
 class SyncopateValidationException extends \InvalidArgumentException
 {

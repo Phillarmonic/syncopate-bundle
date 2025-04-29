@@ -1,12 +1,12 @@
 <?php
 
-namespace Philharmonic\SyncopateBundle\Mapper;
+namespace Phillarmonic\SyncopateBundle\Mapper;
 
-use Philharmonic\SyncopateBundle\Attribute\Entity;
-use Philharmonic\SyncopateBundle\Attribute\Field;
-use Philharmonic\SyncopateBundle\Exception\SyncopateValidationException;
-use Philharmonic\SyncopateBundle\Model\EntityDefinition;
-use Philharmonic\SyncopateBundle\Model\FieldDefinition;
+use Phillarmonic\SyncopateBundle\Attribute\Entity;
+use Phillarmonic\SyncopateBundle\Attribute\Field;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateValidationException;
+use Phillarmonic\SyncopateBundle\Model\EntityDefinition;
+use Phillarmonic\SyncopateBundle\Model\FieldDefinition;
 use ReflectionClass;
 use ReflectionProperty;
 use DateTime;

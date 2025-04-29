@@ -1,14 +1,14 @@
 <?php
 
-namespace Philharmonic\SyncopateBundle\Service;
+namespace Phillarmonic\SyncopateBundle\Service;
 
-use Philharmonic\SyncopateBundle\Client\SyncopateClient;
-use Philharmonic\SyncopateBundle\Exception\SyncopateApiException;
-use Philharmonic\SyncopateBundle\Exception\SyncopateValidationException;
-use Philharmonic\SyncopateBundle\Mapper\EntityMapper;
-use Philharmonic\SyncopateBundle\Model\EntityDefinition;
-use Philharmonic\SyncopateBundle\Model\QueryFilter;
-use Philharmonic\SyncopateBundle\Model\QueryOptions;
+use Phillarmonic\SyncopateBundle\Client\SyncopateClient;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateApiException;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateValidationException;
+use Phillarmonic\SyncopateBundle\Mapper\EntityMapper;
+use Phillarmonic\SyncopateBundle\Model\EntityDefinition;
+use Phillarmonic\SyncopateBundle\Model\QueryFilter;
+use Phillarmonic\SyncopateBundle\Model\QueryOptions;
 
 class SyncopateService
 {

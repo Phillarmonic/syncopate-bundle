@@ -1,12 +1,12 @@
 <?php
 
-namespace Philharmonic\SyncopateBundle\Service;
+namespace Phillarmonic\SyncopateBundle\Service;
 
-use Philharmonic\SyncopateBundle\Attribute\Entity;
-use Philharmonic\SyncopateBundle\Client\SyncopateClient;
-use Philharmonic\SyncopateBundle\Exception\SyncopateApiException;
-use Philharmonic\SyncopateBundle\Mapper\EntityMapper;
-use Philharmonic\SyncopateBundle\Model\EntityDefinition;
+use Phillarmonic\SyncopateBundle\Attribute\Entity;
+use Phillarmonic\SyncopateBundle\Client\SyncopateClient;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateApiException;
+use Phillarmonic\SyncopateBundle\Mapper\EntityMapper;
+use Phillarmonic\SyncopateBundle\Model\EntityDefinition;
 use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\HttpKernel\CacheWarmer\CacheWarmerInterface;
