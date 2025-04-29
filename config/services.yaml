@@ -7,13 +7,29 @@ services:
     # Client service
     Phillarmonic\SyncopateBundle\Client\SyncopateClient:
         arguments:
-            $httpClient: '@http_client'
+            $httpClient: '@syncopate_http_client'
             $baseUrl: '%phillarmonic_syncopate.base_url%'
             $defaultOptions:
                 timeout: '%phillarmonic_syncopate.timeout%'
-                max_retries: '%phillarmonic_syncopate.max_retries%'
-                retry_delay: '%phillarmonic_syncopate.retry_delay%'
         public: true
+
+    # Http client with retry capability
+    syncopate_http_client:
+        class: Symfony\Component\HttpClient\RetryableHttpClient
+        arguments:
+            $client: '@http_client'
+            $strategy: '@syncopate_retry_strategy'
+            $maxRetries: '%phillarmonic_syncopate.max_retries%'
+
+    # Retry strategy for an http client
+    syncopate_retry_strategy:
+        class: Symfony\Component\HttpClient\Retry\GenericRetryStrategy
+        arguments:
+            $delayMs: '%phillarmonic_syncopate.retry_delay%'
+            $multiplier: 2
+            $maxDelayMs: 60000
+            $httpCodes: [0, 423, 425, 429, 500, 502, 503, 504, 507, 510]
+            $statusCodes: [0, 2, 3]
 
     # Entity type registry service
     Phillarmonic\SyncopateBundle\Service\EntityTypeRegistry:

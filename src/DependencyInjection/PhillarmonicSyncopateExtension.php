@@ -17,7 +17,7 @@ class PhillarmonicSyncopateExtension extends Extension
         $loader = new YamlFileLoader($container, new FileLocator(__DIR__ . '/../../config'));
         $loader->load('services.yaml');
 
-        // Configure the SyncopateClient with the provided parameters
+        // Configure parameters for the bundle services
         $container->setParameter('phillarmonic_syncopate.base_url', $config['base_url']);
         $container->setParameter('phillarmonic_syncopate.timeout', $config['timeout']);
         $container->setParameter('phillarmonic_syncopate.retry_failed', $config['retry_failed']);

@@ -25,7 +25,7 @@ class SyncopateClient
     }
 
     /**
-     * Get information about the SyncopateDB server.
+     * Get information about the SyncopateDB API.
      */
     public function getInfo(): array
     {
@@ -140,7 +140,7 @@ class SyncopateClient
             $response = $this->httpClient->request($method, $url, $requestOptions);
             return $this->processResponse($response);
         } catch (ClientException|ServerException $e) {
-            // Try to extract error message from response
+            // Try to extract an error message from response
             $response = $e->getResponse();
             $statusCode = $response->getStatusCode();
             $error = $this->parseErrorResponse($response);
@@ -148,7 +148,8 @@ class SyncopateClient
             throw new SyncopateApiException(
                 $error['message'] ?? $e->getMessage(),
                 $statusCode,
-                $e
+                $e,
+                $error
             );
         } catch (\Throwable $e) {
             throw new SyncopateApiException(
