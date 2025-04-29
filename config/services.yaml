@@ -5,45 +5,45 @@ services:
         public: false
 
     # Client service
-    Philharmonic\SyncopateBundle\Client\SyncopateClient:
+    Phillarmonic\SyncopateBundle\Client\SyncopateClient:
         arguments:
             $httpClient: '@http_client'
-            $baseUrl: '%philharmonic_syncopate.base_url%'
+            $baseUrl: '%phillarmonic_syncopate.base_url%'
             $defaultOptions:
-                timeout: '%philharmonic_syncopate.timeout%'
-                max_retries: '%philharmonic_syncopate.max_retries%'
-                retry_delay: '%philharmonic_syncopate.retry_delay%'
+                timeout: '%phillarmonic_syncopate.timeout%'
+                max_retries: '%phillarmonic_syncopate.max_retries%'
+                retry_delay: '%phillarmonic_syncopate.retry_delay%'
         public: true
 
     # Entity type registry service
-    Philharmonic\SyncopateBundle\Service\EntityTypeRegistry:
+    Phillarmonic\SyncopateBundle\Service\EntityTypeRegistry:
         arguments:
-            $entityPaths: '%philharmonic_syncopate.entity_paths%'
-            $autoCreateEntityTypes: '%philharmonic_syncopate.auto_create_entity_types%'
-            $cacheEntityTypes: '%philharmonic_syncopate.cache_entity_types%'
-            $cacheTtl: '%philharmonic_syncopate.cache_ttl%'
+            $entityPaths: '%phillarmonic_syncopate.entity_paths%'
+            $autoCreateEntityTypes: '%phillarmonic_syncopate.auto_create_entity_types%'
+            $cacheEntityTypes: '%phillarmonic_syncopate.cache_entity_types%'
+            $cacheTtl: '%phillarmonic_syncopate.cache_ttl%'
         calls:
             - [initialize, []]
 
     # Main service for interacting with SyncopateDB
-    Philharmonic\SyncopateBundle\Service\SyncopateService:
+    Phillarmonic\SyncopateBundle\Service\SyncopateService:
         arguments:
-            $client: '@Philharmonic\SyncopateBundle\Client\SyncopateClient'
-            $entityTypeRegistry: '@Philharmonic\SyncopateBundle\Service\EntityTypeRegistry'
+            $client: '@Phillarmonic\SyncopateBundle\Client\SyncopateClient'
+            $entityTypeRegistry: '@Phillarmonic\SyncopateBundle\Service\EntityTypeRegistry'
         public: true
 
     # Entity mapper
-    Philharmonic\SyncopateBundle\Mapper\EntityMapper:
+    Phillarmonic\SyncopateBundle\Mapper\EntityMapper:
         public: false
 
     # Repository factory
-    Philharmonic\SyncopateBundle\Repository\EntityRepositoryFactory:
+    Phillarmonic\SyncopateBundle\Repository\EntityRepositoryFactory:
         arguments:
-            $syncopateService: '@Philharmonic\SyncopateBundle\Service\SyncopateService'
-            $entityMapper: '@Philharmonic\SyncopateBundle\Mapper\EntityMapper'
+            $syncopateService: '@Phillarmonic\SyncopateBundle\Service\SyncopateService'
+            $entityMapper: '@Phillarmonic\SyncopateBundle\Mapper\EntityMapper'
         public: true
 
     # Register the controller if enabled
-    Philharmonic\SyncopateBundle\Controller\SyncopateProxyController:
+    Phillarmonic\SyncopateBundle\Controller\SyncopateProxyController:
         public: true
         tags: ['controller.service_arguments']
