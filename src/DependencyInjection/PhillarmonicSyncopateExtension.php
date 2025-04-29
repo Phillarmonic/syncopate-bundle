@@ -31,6 +31,6 @@ class PhillarmonicSyncopateExtension extends Extension
 
     public function getAlias(): string
     {
-        return 'philharmonic_syncopate';
+        return 'phillarmonic_syncopate';
     }
 }
