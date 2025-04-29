@@ -9,7 +9,7 @@ class Configuration implements ConfigurationInterface
 {
     public function getConfigTreeBuilder(): TreeBuilder
     {
-        $treeBuilder = new TreeBuilder('philharmonic_syncopate');
+        $treeBuilder = new TreeBuilder('phillarmonic_syncopate');
         $rootNode = $treeBuilder->getRootNode();
 
         $rootNode

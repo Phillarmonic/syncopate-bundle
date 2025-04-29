@@ -18,15 +18,15 @@ class PhillarmonicSyncopateExtension extends Extension
         $loader->load('services.yaml');
 
         // Configure the SyncopateClient with the provided parameters
-        $container->setParameter('philharmonic_syncopate.base_url', $config['base_url']);
-        $container->setParameter('philharmonic_syncopate.timeout', $config['timeout']);
-        $container->setParameter('philharmonic_syncopate.retry_failed', $config['retry_failed']);
-        $container->setParameter('philharmonic_syncopate.max_retries', $config['max_retries']);
-        $container->setParameter('philharmonic_syncopate.retry_delay', $config['retry_delay']);
-        $container->setParameter('philharmonic_syncopate.entity_paths', $config['entity_paths']);
-        $container->setParameter('philharmonic_syncopate.auto_create_entity_types', $config['auto_create_entity_types']);
-        $container->setParameter('philharmonic_syncopate.cache_entity_types', $config['cache_entity_types']);
-        $container->setParameter('philharmonic_syncopate.cache_ttl', $config['cache_ttl']);
+        $container->setParameter('phillarmonic_syncopate.base_url', $config['base_url']);
+        $container->setParameter('phillarmonic_syncopate.timeout', $config['timeout']);
+        $container->setParameter('phillarmonic_syncopate.retry_failed', $config['retry_failed']);
+        $container->setParameter('phillarmonic_syncopate.max_retries', $config['max_retries']);
+        $container->setParameter('phillarmonic_syncopate.retry_delay', $config['retry_delay']);
+        $container->setParameter('phillarmonic_syncopate.entity_paths', $config['entity_paths']);
+        $container->setParameter('phillarmonic_syncopate.auto_create_entity_types', $config['auto_create_entity_types']);
+        $container->setParameter('phillarmonic_syncopate.cache_entity_types', $config['cache_entity_types']);
+        $container->setParameter('phillarmonic_syncopate.cache_ttl', $config['cache_ttl']);
     }
 
     public function getAlias(): string

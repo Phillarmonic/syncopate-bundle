@@ -23,10 +23,10 @@ return [
 
 ### Step 3: Configure the Bundle
 
-Create a configuration file at `config/packages/philharmonic_syncopate.yaml`:
+Create a configuration file at `config/packages/phillarmonic_syncopate.yaml`:
 
 ```yaml
-philharmonic_syncopate:
+phillarmonic_syncopate:
     # Required: set the base URL of your SyncopateDB instance
     base_url: 'http://localhost:8080'
 
