@@ -17,8 +17,8 @@ use ReflectionClass;
 use Phillarmonic\SyncopateBundle\Attribute\Entity;
 
 #[AsCommand(
-    name: 'phillarmonic:syncopate:register-entity-types',
-    description: 'Register entity types in SyncopateDB',
+    name: 'syncopate:register-entity-types',
+    description: 'Register entity types in Syncopate',
 )]
 class RegisterEntityTypesCommand extends Command
 {
