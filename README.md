@@ -7,7 +7,7 @@ A Symfony bundle for integrating with SyncopateDB, a flexible, lightweight data 
 ### Step 1: Install the Bundle
 
 ```bash
-composer require philharmonic/syncopate-bundle
+composer require phillarmonic/syncopate-bundle
 ```
 
 ### Step 2: Enable the Bundle
@@ -17,7 +17,7 @@ If you're using Symfony Flex, the bundle will be enabled automatically. Otherwis
 ```php
 return [
     // ...
-    Philharmonic\SyncopateBundle\PhillarmonicSyncopateBundle::class => ['all' => true],
+    Phillarmonic\SyncopateBundle\PhillarmonicSyncopateBundle::class => ['all' => true],
 ];
 ```
 
@@ -57,9 +57,9 @@ Define your entities using PHP 8 attributes:
 
 namespace App\Entity;
 
-use Philharmonic\SyncopateBundle\Attribute\Entity;
-use Philharmonic\SyncopateBundle\Attribute\Field;
-use Philharmonic\SyncopateBundle\Model\EntityDefinition;
+use Phillarmonic\SyncopateBundle\Attribute\Entity;
+use Phillarmonic\SyncopateBundle\Attribute\Field;
+use Phillarmonic\SyncopateBundle\Model\EntityDefinition;
 
 #[Entity(name: 'product', idGenerator: EntityDefinition::ID_TYPE_UUID)]
 class Product
@@ -98,7 +98,7 @@ Use the repository pattern to interact with your entities:
 namespace App\Controller;
 
 use App\Entity\Product;
-use Philharmonic\SyncopateBundle\Repository\EntityRepositoryFactory;
+use Phillarmonic\SyncopateBundle\Repository\EntityRepositoryFactory;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
@@ -202,7 +202,7 @@ You can also inject and use the `SyncopateService` directly:
 ```php
 <?php
 
-use Philharmonic\SyncopateBundle\Service\SyncopateService;
+use Phillarmonic\SyncopateBundle\Service\SyncopateService;
 
 class ProductService
 {
