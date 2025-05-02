@@ -369,7 +369,7 @@ class SyncopateService
             }
         }
     }
-    
+
     /**
      * Find entities by criteria
      */
