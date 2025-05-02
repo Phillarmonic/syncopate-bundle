@@ -88,6 +88,81 @@ class Product
 }
 ```
 
+### Entity Relationships
+
+SyncopateBundle supports entity relationships with cascade operations:
+
+```php
+<?php
+
+namespace App\Entity;
+
+use Phillarmonic\SyncopateBundle\Attribute\Entity;
+use Phillarmonic\SyncopateBundle\Attribute\Field;
+use Phillarmonic\SyncopateBundle\Attribute\Relationship;
+use DateTimeInterface;
+
+#[Entity]
+class Post
+{
+    #[Field]
+    private ?int $id = null;
+
+    #[Field(required: true)]
+    private string $title;
+
+    #[Field(required: true)]
+    private string $content;
+
+    #[Field(type: 'datetime', required: true)]
+    private DateTimeInterface $createdAt;
+
+    // One-to-many relationship with Comment entities and cascade delete
+    #[Relationship(
+        targetEntity: Comment::class,
+        type: Relationship::TYPE_ONE_TO_MANY,
+        mappedBy: 'post',
+        cascade: Relationship::CASCADE_REMOVE
+    )]
+    private array $comments = [];
+
+    // ... getters and setters
+}
+
+#[Entity]
+class Comment
+{
+    #[Field]
+    private ?int $id = null;
+
+    #[Field(required: true)]
+    private string $content;
+
+    #[Field(indexed: true, required: true)]
+    private int $postId;
+
+    // Many-to-one relationship with Post entity
+    #[Relationship(
+        targetEntity: Post::class,
+        type: Relationship::TYPE_MANY_TO_ONE,
+        inversedBy: 'comments'
+    )]
+    private ?Post $post = null;
+
+    // ... getters and setters
+}
+```
+
+Supported relationship types:
+- `TYPE_ONE_TO_ONE`: Single reference in both directions
+- `TYPE_ONE_TO_MANY`: Collection on one side, single reference on the other
+- `TYPE_MANY_TO_ONE`: Single reference on one side, collection on the other
+- `TYPE_MANY_TO_MANY`: Collections on both sides
+
+Cascade options:
+- `CASCADE_NONE`: No cascading actions (default)
+- `CASCADE_REMOVE`: Automatically delete related entities when the parent is deleted
+
 ### Repository Pattern
 
 Use the repository pattern to interact with your entities:
@@ -170,6 +245,8 @@ class ProductController extends AbstractController
     public function delete(string $id): Response
     {
         $repository = $this->repositoryFactory->getRepository(Product::class);
+        
+        // Will automatically delete related entities with CASCADE_REMOVE
         $success = $repository->deleteById($id);
 
         return $this->json(['success' => $success]);
@@ -193,6 +270,20 @@ $products = $queryBuilder
     ->limit(10)
     ->offset(0)
     ->getResult();
+```
+
+### Join Queries
+
+Use join queries to fetch related entities in a single request:
+
+```php
+$repository = $this->repositoryFactory->getRepository(Post::class);
+$joinQueryBuilder = $repository->createJoinQueryBuilder();
+
+$posts = $joinQueryBuilder
+    ->innerJoin('comment', 'id', 'postId', 'comments')
+    ->gt('comments.createdAt', new \DateTime('-7 days'))
+    ->getJoinResult();
 ```
 
 ### Direct Service Usage
@@ -221,7 +312,31 @@ class ProductService
             ['price' => 'ASC']
         );
     }
+    
+    public function deleteProductWithRelations(string $id): bool
+    {
+        // Will automatically handle cascade delete based on relationship attributes
+        return $this->syncopateService->deleteById(Product::class, $id, true);
+    }
 }
+```
+
+## Command Line Tools
+
+The bundle provides console commands for managing entities:
+
+```bash
+# Register entity types in SyncopateDB
+bin/console syncopate:register-entity-types
+
+# Force update of entity types even if they already exist
+bin/console syncopate:register-entity-types --force
+
+# Specify additional paths to scan for entity classes
+bin/console syncopate:register-entity-types --path=src/CustomEntities
+
+# Register specific entity classes
+bin/console syncopate:register-entity-types --class=App\\Entity\\Product
 ```
 
 ## License
