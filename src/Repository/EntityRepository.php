@@ -3,6 +3,7 @@
 namespace Phillarmonic\SyncopateBundle\Repository;
 
 use Phillarmonic\SyncopateBundle\Mapper\EntityMapper;
+use Phillarmonic\SyncopateBundle\Model\JoinQueryOptions;
 use Phillarmonic\SyncopateBundle\Model\QueryFilter;
 use Phillarmonic\SyncopateBundle\Model\QueryOptions;
 use Phillarmonic\SyncopateBundle\Service\SyncopateService;
@@ -131,5 +132,21 @@ class EntityRepository
     public function executeQuery(QueryOptions $queryOptions): array
     {
         return $this->syncopateService->query($this->entityClass, $queryOptions);
+    }
+
+    /**
+     * Create a join query builder
+     */
+    public function createJoinQueryBuilder(): JoinQueryBuilder
+    {
+        return new JoinQueryBuilder($this->syncopateService, $this->entityClass);
+    }
+
+    /**
+     * Execute a join query with JoinQueryOptions
+     */
+    public function executeJoinQuery(JoinQueryOptions $joinQueryOptions): array
+    {
+        return $this->syncopateService->joinQuery($this->entityClass, $joinQueryOptions);
     }
 }

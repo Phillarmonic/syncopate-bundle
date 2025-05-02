@@ -7,6 +7,7 @@ use Phillarmonic\SyncopateBundle\Exception\SyncopateApiException;
 use Phillarmonic\SyncopateBundle\Exception\SyncopateValidationException;
 use Phillarmonic\SyncopateBundle\Mapper\EntityMapper;
 use Phillarmonic\SyncopateBundle\Model\EntityDefinition;
+use Phillarmonic\SyncopateBundle\Model\JoinQueryOptions;
 use Phillarmonic\SyncopateBundle\Model\QueryFilter;
 use Phillarmonic\SyncopateBundle\Model\QueryOptions;
 
@@ -311,5 +312,50 @@ class SyncopateService
         $response = $this->client->query($queryOptions->toArray());
 
         return $response['total'] ?? 0;
+    }
+    /**
+     * Execute a join query
+     */
+    public function joinQuery(string $className, JoinQueryOptions $joinQueryOptions): array
+    {
+        // Get entity type from entity class
+        $entityType = $this->entityTypeRegistry->getEntityType($className);
+
+        if ($entityType === null) {
+            throw new \InvalidArgumentException("Class $className is not registered as an entity");
+        }
+
+        // Make sure the query is for the correct entity type
+        if ($joinQueryOptions->getEntityType() !== $entityType) {
+            throw new \InvalidArgumentException("Query entity type does not match class entity type");
+        }
+
+        // Execute join query
+        $response = $this->client->joinQuery($joinQueryOptions->toArray());
+
+        // Map results to entity objects
+        $entities = [];
+        foreach ($response['data'] as $entityData) {
+            $entity = $this->entityMapper->mapToObject($entityData, $className);
+
+            // Process joined data
+            foreach ($entityData as $key => $value) {
+                // Skip standard entity fields
+                if (in_array($key, ['id', 'fields'])) {
+                    continue;
+                }
+
+                // This is a joined entity or collection
+                $reflection = new \ReflectionProperty($entity, $key);
+                if (!$reflection->isInitialized($entity)) {
+                    $reflection->setAccessible(true);
+                    $reflection->setValue($entity, $value);
+                }
+            }
+
+            $entities[] = $entity;
+        }
+
+        return $entities;
     }
 }
