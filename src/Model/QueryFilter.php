@@ -28,7 +28,7 @@ class QueryFilter
     {
         $this->field = $field;
         $this->operator = $operator;
-        $this->value = $value;
+        $this->value = $this->sanitizeFilterValue($value);
     }
 
     public function getField(): string
@@ -56,6 +56,39 @@ class QueryFilter
             'operator' => $this->operator,
             'value' => $this->value,
         ];
+    }
+
+    /**
+     * Sanitize filter value to ensure it can be properly JSON-encoded
+     */
+    private function sanitizeFilterValue(mixed $value): mixed
+    {
+        if (is_array($value)) {
+            // Recursively sanitize array values
+            $sanitized = [];
+            foreach ($value as $k => $v) {
+                $sanitized[$k] = $this->sanitizeFilterValue($v);
+            }
+            return $sanitized;
+        } elseif (is_object($value)) {
+            // Convert objects to appropriate representations
+            if (method_exists($value, '__toString')) {
+                return (string)$value;
+            } elseif (method_exists($value, 'toArray')) {
+                return $value->toArray();
+            } elseif ($value instanceof \DateTime || $value instanceof \DateTimeInterface) {
+                return $value->format(\DateTimeInterface::ATOM);
+            } else {
+                // Last resort - convert to array via JSON
+                return json_decode(json_encode($value), true);
+            }
+        } elseif (is_resource($value)) {
+            // Resources can't be used in filters
+            throw new \InvalidArgumentException("Resources cannot be used as filter values");
+        }
+
+        // Scalars and null are fine as-is
+        return $value;
     }
 
     /**
