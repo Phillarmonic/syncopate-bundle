@@ -246,22 +246,35 @@ class SyncopateService
             // Handle based on relationship type
             switch ($relationshipAttribute->type) {
                 case Relationship::TYPE_ONE_TO_ONE:
+                    // Single entity
+                    $this->delete($relatedData, true);
+                    break;
+
                 case Relationship::TYPE_MANY_TO_ONE:
                     // Single entity
                     $this->delete($relatedData, true);
                     break;
 
                 case Relationship::TYPE_ONE_TO_MANY:
+                    // Collection of entities
+                    if (is_array($relatedData) || $relatedData instanceof \Traversable) {
+                        foreach ($relatedData as $relatedEntity) {
+                            $this->delete($relatedEntity, true);
+                        }
+                    }
+                    break;
+
                 case Relationship::TYPE_MANY_TO_MANY:
                     // Collection of entities
-                    foreach ($relatedData as $relatedEntity) {
-                        $this->delete($relatedEntity, true);
+                    if (is_array($relatedData) || $relatedData instanceof \Traversable) {
+                        foreach ($relatedData as $relatedEntity) {
+                            $this->delete($relatedEntity, true);
+                        }
                     }
                     break;
             }
         }
-    }
-    /**
+    }    /**
      * Find entities by criteria
      */
     public function findBy(string $className, array $criteria = [], array $orderBy = [], int $limit = null, int $offset = 0): array
