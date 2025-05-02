@@ -205,76 +205,172 @@ class SyncopateService
 
     /**
      * Process cascade delete for related entities
+     * @throws \ReflectionException
      */
     private function processCascadeDelete(object $entity): void
     {
         $className = get_class($entity);
+        $entityType = $this->entityTypeRegistry->getEntityType($className);
         $reflection = new \ReflectionClass($className);
 
-        // Iterate through properties to find relationships with cascade delete
-        foreach ($reflection->getProperties() as $property) {
-            $relationshipAttributes = $property->getAttributes(Relationship::class);
+        // Get entity ID
+        $idProperty = $reflection->getProperty('id');
+        $idProperty->setAccessible(true);
+        $entityId = $idProperty->getValue($entity);
 
-            if (empty($relationshipAttributes)) {
+        if (!$entityId) {
+            return; // Can't process cascade if entity has no ID
+        }
+
+        // Get relationship metadata
+        $metadata = $this->relationshipRegistry->getRelationshipMetadata($className);
+        $relationships = $metadata->getRelationships();
+
+        foreach ($relationships as $propertyName => $relationshipData) {
+            // Skip if not a cascade delete relationship
+            if ($relationshipData['cascade'] !== Relationship::CASCADE_REMOVE) {
                 continue;
             }
 
-            /** @var Relationship $relationshipAttribute */
-            $relationshipAttribute = $relationshipAttributes[0]->newInstance();
-
-            // Only process properties with cascade="remove"
-            if ($relationshipAttribute->cascade !== Relationship::CASCADE_REMOVE) {
-                continue;
-            }
-
-            // Access the property value
+            $property = $relationshipData['property'];
             $property->setAccessible(true);
+            $targetEntityClass = $relationshipData['targetEntity'];
+            $relationType = $relationshipData['type'];
 
-            // Skip if the property hasn't been initialized
-            if (!$property->isInitialized($entity)) {
-                continue;
+            // First check if the property is already initialized and has data
+            $relatedEntities = [];
+            $hasData = false;
+
+            if ($property->isInitialized($entity)) {
+                $relatedData = $property->getValue($entity);
+                $hasData = !empty($relatedData);
+
+                if ($hasData) {
+                    if (is_array($relatedData) || $relatedData instanceof \Traversable) {
+                        $relatedEntities = $relatedData;
+                    } else {
+                        $relatedEntities = [$relatedData];
+                    }
+                }
             }
 
-            $relatedData = $property->getValue($entity);
+            // If no data is loaded, try to load the related entities based on relationship type
+            if (!$hasData) {
+                $targetEntityType = $this->entityTypeRegistry->getEntityType($targetEntityClass);
 
-            if ($relatedData === null) {
-                continue;
+                if ($targetEntityType === null) {
+                    continue; // Skip if target entity type is not registered
+                }
+
+                switch ($relationType) {
+                    case Relationship::TYPE_ONE_TO_MANY:
+                        // For one-to-many, find all target entities referencing this entity
+                        // Use mappedBy to determine the field in the target entity
+                        if (!empty($relationshipData['mappedBy'])) {
+                            // Find related entities using filter on mappedBy property
+                            $queryOptions = new QueryOptions($targetEntityType);
+                            $queryOptions->addFilter(QueryFilter::eq($relationshipData['mappedBy'] . 'Id', $entityId));
+                            $response = $this->client->query($queryOptions->toArray());
+
+                            if (isset($response['data']) && !empty($response['data'])) {
+                                foreach ($response['data'] as $relatedEntityData) {
+                                    $relatedEntities[] = $this->entityMapper->mapToObject($relatedEntityData, $targetEntityClass);
+                                }
+                            }
+                        }
+                        break;
+
+                    case Relationship::TYPE_MANY_TO_ONE:
+                        // For many-to-one, we don't typically cascade delete upward
+                        // But if specified, find the parent entity
+                        if (!empty($relationshipData['inversedBy'])) {
+                            $joinColumn = $relationshipData['joinColumn'] ?? $propertyName . 'Id';
+                            $joinColumnValue = null;
+
+                            // Try to get the join column value from the entity
+                            $joinColumnProperty = $reflection->hasProperty($joinColumn)
+                                ? $reflection->getProperty($joinColumn)
+                                : null;
+
+                            if ($joinColumnProperty) {
+                                $joinColumnProperty->setAccessible(true);
+                                $joinColumnValue = $joinColumnProperty->getValue($entity);
+                            }
+
+                            if ($joinColumnValue) {
+                                try {
+                                    $relatedEntity = $this->getById($targetEntityClass, $joinColumnValue);
+                                    $relatedEntities[] = $relatedEntity;
+                                } catch (\Throwable $e) {
+                                    // Entity not found, ignore
+                                }
+                            }
+                        }
+                        break;
+
+                    case Relationship::TYPE_ONE_TO_ONE:
+                        // For one-to-one, there are two cases:
+                        // 1. This entity is the owner (has the FK) - no need to load anything
+                        // 2. This entity is not the owner (mapped by other side) - find related entity
+                        if (!empty($relationshipData['mappedBy'])) {
+                            // This entity is not the owner, find the related entity
+                            $queryOptions = new QueryOptions($targetEntityType);
+                            $queryOptions->addFilter(QueryFilter::eq($relationshipData['mappedBy'] . 'Id', $entityId));
+                            $queryOptions->setLimit(1);
+                            $response = $this->client->query($queryOptions->toArray());
+
+                            if (isset($response['data'][0])) {
+                                $relatedEntities[] = $this->entityMapper->mapToObject($response['data'][0], $targetEntityClass);
+                            }
+                        } else if (!empty($relationshipData['inversedBy'])) {
+                            // This entity is the owner, get the related entity by FK
+                            $joinColumn = $relationshipData['joinColumn'] ?? $propertyName . 'Id';
+                            $joinColumnProperty = $reflection->hasProperty($joinColumn)
+                                ? $reflection->getProperty($joinColumn)
+                                : null;
+
+                            if ($joinColumnProperty) {
+                                $joinColumnProperty->setAccessible(true);
+                                $joinColumnValue = $joinColumnProperty->getValue($entity);
+
+                                if ($joinColumnValue) {
+                                    try {
+                                        $relatedEntity = $this->getById($targetEntityClass, $joinColumnValue);
+                                        $relatedEntities[] = $relatedEntity;
+                                    } catch (\Throwable $e) {
+                                        // Entity isn't found, ignore
+                                    }
+                                }
+                            }
+                        }
+                        break;
+
+                    case Relationship::TYPE_MANY_TO_MANY:
+                        // For many-to-many, need to find entities from join table
+                        // This is more complex and might need separate join table handling
+                        if (!empty($relationshipData['joinTable'])) {
+                            // TODO: Implement many-to-many cascading via join table
+                            // Would require custom query or additional processing
+                        }
+                        break;
+                }
             }
 
-            $targetEntityClass = $relationshipAttribute->targetEntity;
-
-            // Handle based on relationship type
-            switch ($relationshipAttribute->type) {
-                case Relationship::TYPE_ONE_TO_ONE:
-                    // Single entity
-                    $this->delete($relatedData, true);
-                    break;
-
-                case Relationship::TYPE_MANY_TO_ONE:
-                    // Single entity
-                    $this->delete($relatedData, true);
-                    break;
-
-                case Relationship::TYPE_ONE_TO_MANY:
-                    // Collection of entities
-                    if (is_array($relatedData) || $relatedData instanceof \Traversable) {
-                        foreach ($relatedData as $relatedEntity) {
-                            $this->delete($relatedEntity, true);
-                        }
+            // Now delete all related entities
+            foreach ($relatedEntities as $relatedEntity) {
+                if (is_object($relatedEntity) && is_a($relatedEntity, $targetEntityClass)) {
+                    try {
+                        $this->delete($relatedEntity, true); // Recursive cascade
+                    } catch (\Throwable $e) {
+                        // Log error but continue with other entities
+                        // Could add logging here
                     }
-                    break;
-
-                case Relationship::TYPE_MANY_TO_MANY:
-                    // Collection of entities
-                    if (is_array($relatedData) || $relatedData instanceof \Traversable) {
-                        foreach ($relatedData as $relatedEntity) {
-                            $this->delete($relatedEntity, true);
-                        }
-                    }
-                    break;
+                }
             }
         }
-    }    /**
+    }
+    
+    /**
      * Find entities by criteria
      */
     public function findBy(string $className, array $criteria = [], array $orderBy = [], int $limit = null, int $offset = 0): array
