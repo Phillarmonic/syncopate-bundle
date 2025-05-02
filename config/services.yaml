@@ -62,3 +62,9 @@ services:
     Phillarmonic\SyncopateBundle\Command\RegisterEntityTypesCommand:
         tags:
             - { name: console.command }
+
+    Phillarmonic\SyncopateBundle\Metadata\RelationshipMetadata:
+        public: false
+
+    Phillarmonic\SyncopateBundle\Service\RelationshipRegistry:
+        public: false

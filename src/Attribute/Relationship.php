@@ -12,6 +12,10 @@ class Relationship
     public const TYPE_MANY_TO_ONE = 'many_to_one';
     public const TYPE_MANY_TO_MANY = 'many_to_many';
 
+    // Add cascade options
+    public const CASCADE_NONE = 'none';
+    public const CASCADE_REMOVE = 'remove';
+
     public function __construct(
         public readonly string $targetEntity,
         public readonly string $type,
@@ -20,7 +24,8 @@ class Relationship
         public readonly ?string $joinColumn = null,
         public readonly ?string $joinTable = null,
         public readonly ?array $joinColumns = null,
-        public readonly ?array $inverseJoinColumns = null
+        public readonly ?array $inverseJoinColumns = null,
+        public readonly string $cascade = self::CASCADE_NONE
     ) {
     }
 }

@@ -2,6 +2,7 @@
 
 namespace Phillarmonic\SyncopateBundle\Service;
 
+use Phillarmonic\SyncopateBundle\Attribute\Relationship;
 use Phillarmonic\SyncopateBundle\Client\SyncopateClient;
 use Phillarmonic\SyncopateBundle\Exception\SyncopateApiException;
 use Phillarmonic\SyncopateBundle\Exception\SyncopateValidationException;
@@ -16,15 +17,18 @@ class SyncopateService
     private SyncopateClient $client;
     private EntityTypeRegistry $entityTypeRegistry;
     private EntityMapper $entityMapper;
+    private RelationshipRegistry $relationshipRegistry;
 
     public function __construct(
         SyncopateClient $client,
         EntityTypeRegistry $entityTypeRegistry,
-        EntityMapper $entityMapper
+        EntityMapper $entityMapper,
+        RelationshipRegistry $relationshipRegistry
     ) {
         $this->client = $client;
         $this->entityTypeRegistry = $entityTypeRegistry;
         $this->entityMapper = $entityMapper;
+        $this->relationshipRegistry = $relationshipRegistry;
     }
 
     /**
@@ -153,7 +157,7 @@ class SyncopateService
     /**
      * Delete an entity
      */
-    public function delete(object $entity): bool
+    public function delete(object $entity, bool $enableCascade = true): bool
     {
         // Get entity type from entity class
         $className = get_class($entity);
@@ -168,6 +172,11 @@ class SyncopateService
 
         if (!isset($data['id'])) {
             throw new SyncopateValidationException("Entity must have an ID for delete operation");
+        }
+
+        // Process cascade delete if enabled
+        if ($enableCascade) {
+            $this->processCascadeDelete($entity);
         }
 
         // Delete entity from SyncopateDB
@@ -192,6 +201,51 @@ class SyncopateService
         $response = $this->client->deleteEntity($entityType, (string) $id);
 
         return isset($response['message']) && strpos($response['message'], 'successfully') !== false;
+    }
+
+    /**
+     * Process cascade delete for related entities
+     */
+    private function processCascadeDelete(object $entity): void
+    {
+        $className = get_class($entity);
+        $relationshipMetadata = $this->relationshipRegistry->getRelationshipMetadata($className);
+
+        if (!$relationshipMetadata->hasCascadeDeleteRelationships()) {
+            return;
+        }
+
+        foreach ($relationshipMetadata->getRelationships() as $relationshipName => $relationship) {
+            if ($relationship['cascade'] !== Relationship::CASCADE_REMOVE) {
+                continue;
+            }
+
+            $property = $relationship['property'];
+            $property->setAccessible(true);
+            $relatedData = $property->getValue($entity);
+
+            if ($relatedData === null) {
+                continue;
+            }
+
+            $targetEntityClass = $relationship['targetEntity'];
+
+            switch ($relationship['type']) {
+                case Relationship::TYPE_ONE_TO_ONE:
+                case Relationship::TYPE_MANY_TO_ONE:
+                    // Single entity
+                    $this->delete($relatedData, true);
+                    break;
+
+                case Relationship::TYPE_ONE_TO_MANY:
+                case Relationship::TYPE_MANY_TO_MANY:
+                    // Collection of entities
+                    foreach ($relatedData as $relatedEntity) {
+                        $this->delete($relatedEntity, true);
+                    }
+                    break;
+            }
+        }
     }
 
     /**

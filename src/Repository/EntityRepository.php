@@ -97,9 +97,9 @@ class EntityRepository
     }
 
     /**
-     * Delete an entity
+     * Delete an entity with optional cascade delete
      */
-    public function delete(object $entity): bool
+    public function delete(object $entity, bool $cascade = false): bool
     {
         if (!$entity instanceof $this->entityClass) {
             throw new \InvalidArgumentException(
@@ -107,14 +107,24 @@ class EntityRepository
             );
         }
 
-        return $this->syncopateService->delete($entity);
+        return $this->syncopateService->delete($entity, $cascade);
     }
 
     /**
-     * Delete entity by ID
+     * Delete entity by ID with optional cascade delete
      */
-    public function deleteById(string|int $id): bool
+    public function deleteById(string|int $id, bool $cascade = false): bool
     {
+        if ($cascade) {
+            // For cascade delete, we need to load the entity first
+            $entity = $this->find($id);
+            if ($entity === null) {
+                return false;
+            }
+
+            return $this->delete($entity, true);
+        }
+
         return $this->syncopateService->deleteById($this->entityClass, $id);
     }
 
