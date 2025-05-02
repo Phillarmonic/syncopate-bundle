@@ -14,6 +14,8 @@ use Phillarmonic\SyncopateBundle\Model\QueryOptions;
 
 class SyncopateService
 {
+    private const BATCH_SIZE = 25;
+
     private SyncopateClient $client;
     private EntityTypeRegistry $entityTypeRegistry;
     private EntityMapper $entityMapper;
@@ -150,8 +152,13 @@ class SyncopateService
         // Update entity in SyncopateDB
         $response = $this->client->updateEntity($entityType, (string) $data['id'], $data['fields']);
 
-        // Get the updated entity
-        return $this->getById($className, $data['id']);
+        // Return the updated entity without fetching it again to save memory
+        $updatedData = [
+            'id' => $data['id'],
+            'fields' => $data['fields'],
+        ];
+
+        return $this->entityMapper->mapToObject($updatedData, $className);
     }
 
     /**
@@ -204,13 +211,12 @@ class SyncopateService
     }
 
     /**
-     * Process cascade delete for related entities
+     * Process cascade delete for related entities with memory optimization
      * @throws \ReflectionException
      */
     private function processCascadeDelete(object $entity): void
     {
         $className = get_class($entity);
-        $entityType = $this->entityTypeRegistry->getEntityType($className);
         $reflection = new \ReflectionClass($className);
 
         // Get entity ID
@@ -236,144 +242,175 @@ class SyncopateService
             $property->setAccessible(true);
             $targetEntityClass = $relationshipData['targetEntity'];
             $relationType = $relationshipData['type'];
+            $targetEntityType = $this->entityTypeRegistry->getEntityType($targetEntityClass);
 
-            // First check if the property is already initialized and has data
-            $relatedEntities = [];
-            $hasData = false;
-
-            if ($property->isInitialized($entity)) {
-                $relatedData = $property->getValue($entity);
-                $hasData = !empty($relatedData);
-
-                if ($hasData) {
-                    if (is_array($relatedData) || $relatedData instanceof \Traversable) {
-                        $relatedEntities = $relatedData;
-                    } else {
-                        $relatedEntities = [$relatedData];
-                    }
-                }
+            if ($targetEntityType === null) {
+                continue; // Skip if target entity type is not registered
             }
 
-            // If no data is loaded, try to load the related entities based on relationship type
-            if (!$hasData) {
-                $targetEntityType = $this->entityTypeRegistry->getEntityType($targetEntityClass);
+            // Process relationship in batches to save memory
+            switch ($relationType) {
+                case Relationship::TYPE_ONE_TO_MANY:
+                    if (!empty($relationshipData['mappedBy'])) {
+                        $this->cascadeDeleteOneToMany(
+                            $entityId,
+                            $targetEntityClass,
+                            $targetEntityType,
+                            $relationshipData['mappedBy']
+                        );
+                    }
+                    break;
 
-                if ($targetEntityType === null) {
-                    continue; // Skip if target entity type is not registered
-                }
+                case Relationship::TYPE_MANY_TO_ONE:
+                    // For many-to-one, we don't typically cascade delete upward
+                    // but if specified, handle the parent entity
+                    if (!empty($relationshipData['inversedBy'])) {
+                        $joinColumn = $relationshipData['joinColumn'] ?? $propertyName . 'Id';
+                        $joinColumnValue = null;
 
-                switch ($relationType) {
-                    case Relationship::TYPE_ONE_TO_MANY:
-                        // For one-to-many, find all target entities referencing this entity
-                        // Use mappedBy to determine the field in the target entity
-                        if (!empty($relationshipData['mappedBy'])) {
-                            // Find related entities using filter on mappedBy property
-                            $queryOptions = new QueryOptions($targetEntityType);
-                            $queryOptions->addFilter(QueryFilter::eq($relationshipData['mappedBy'] . 'Id', $entityId));
-                            $response = $this->client->query($queryOptions->toArray());
+                        $joinColumnProperty = $reflection->hasProperty($joinColumn)
+                            ? $reflection->getProperty($joinColumn)
+                            : null;
 
-                            if (isset($response['data']) && !empty($response['data'])) {
-                                foreach ($response['data'] as $relatedEntityData) {
-                                    $relatedEntities[] = $this->entityMapper->mapToObject($relatedEntityData, $targetEntityClass);
-                                }
+                        if ($joinColumnProperty) {
+                            $joinColumnProperty->setAccessible(true);
+                            $joinColumnValue = $joinColumnProperty->getValue($entity);
+                        }
+
+                        if ($joinColumnValue) {
+                            try {
+                                $this->deleteById($targetEntityClass, $joinColumnValue);
+                            } catch (\Throwable $e) {
+                                // Entity not found, ignore
                             }
                         }
-                        break;
+                    }
+                    break;
 
-                    case Relationship::TYPE_MANY_TO_ONE:
-                        // For many-to-one, we don't typically cascade delete upward
-                        // But if specified, find the parent entity
-                        if (!empty($relationshipData['inversedBy'])) {
-                            $joinColumn = $relationshipData['joinColumn'] ?? $propertyName . 'Id';
-                            $joinColumnValue = null;
+                case Relationship::TYPE_ONE_TO_ONE:
+                    if (!empty($relationshipData['mappedBy'])) {
+                        // This entity is not the owner, find and delete the related entity
+                        $this->cascadeDeleteOneToOne(
+                            $entityId,
+                            $targetEntityClass,
+                            $targetEntityType,
+                            $relationshipData['mappedBy']
+                        );
+                    } else if (!empty($relationshipData['inversedBy'])) {
+                        // This entity is the owner, delete the related entity by FK
+                        $joinColumn = $relationshipData['joinColumn'] ?? $propertyName . 'Id';
+                        $joinColumnProperty = $reflection->hasProperty($joinColumn)
+                            ? $reflection->getProperty($joinColumn)
+                            : null;
 
-                            // Try to get the join column value from the entity
-                            $joinColumnProperty = $reflection->hasProperty($joinColumn)
-                                ? $reflection->getProperty($joinColumn)
-                                : null;
-
-                            if ($joinColumnProperty) {
-                                $joinColumnProperty->setAccessible(true);
-                                $joinColumnValue = $joinColumnProperty->getValue($entity);
-                            }
+                        if ($joinColumnProperty) {
+                            $joinColumnProperty->setAccessible(true);
+                            $joinColumnValue = $joinColumnProperty->getValue($entity);
 
                             if ($joinColumnValue) {
                                 try {
-                                    $relatedEntity = $this->getById($targetEntityClass, $joinColumnValue);
-                                    $relatedEntities[] = $relatedEntity;
+                                    $this->deleteById($targetEntityClass, $joinColumnValue);
                                 } catch (\Throwable $e) {
                                     // Entity not found, ignore
                                 }
                             }
                         }
-                        break;
-
-                    case Relationship::TYPE_ONE_TO_ONE:
-                        // For one-to-one, there are two cases:
-                        // 1. This entity is the owner (has the FK) - no need to load anything
-                        // 2. This entity is not the owner (mapped by other side) - find related entity
-                        if (!empty($relationshipData['mappedBy'])) {
-                            // This entity is not the owner, find the related entity
-                            $queryOptions = new QueryOptions($targetEntityType);
-                            $queryOptions->addFilter(QueryFilter::eq($relationshipData['mappedBy'] . 'Id', $entityId));
-                            $queryOptions->setLimit(1);
-                            $response = $this->client->query($queryOptions->toArray());
-
-                            if (isset($response['data'][0])) {
-                                $relatedEntities[] = $this->entityMapper->mapToObject($response['data'][0], $targetEntityClass);
-                            }
-                        } else if (!empty($relationshipData['inversedBy'])) {
-                            // This entity is the owner, get the related entity by FK
-                            $joinColumn = $relationshipData['joinColumn'] ?? $propertyName . 'Id';
-                            $joinColumnProperty = $reflection->hasProperty($joinColumn)
-                                ? $reflection->getProperty($joinColumn)
-                                : null;
-
-                            if ($joinColumnProperty) {
-                                $joinColumnProperty->setAccessible(true);
-                                $joinColumnValue = $joinColumnProperty->getValue($entity);
-
-                                if ($joinColumnValue) {
-                                    try {
-                                        $relatedEntity = $this->getById($targetEntityClass, $joinColumnValue);
-                                        $relatedEntities[] = $relatedEntity;
-                                    } catch (\Throwable $e) {
-                                        // Entity isn't found, ignore
-                                    }
-                                }
-                            }
-                        }
-                        break;
-
-                    case Relationship::TYPE_MANY_TO_MANY:
-                        // For many-to-many, need to find entities from join table
-                        // This is more complex and might need separate join table handling
-                        if (!empty($relationshipData['joinTable'])) {
-                            // TODO: Implement many-to-many cascading via join table
-                            // Would require custom query or additional processing
-                        }
-                        break;
-                }
-            }
-
-            // Now delete all related entities
-            foreach ($relatedEntities as $relatedEntity) {
-                if (is_object($relatedEntity) && is_a($relatedEntity, $targetEntityClass)) {
-                    try {
-                        $this->delete($relatedEntity, true); // Recursive cascade
-                    } catch (\Throwable $e) {
-                        // Log error but continue with other entities
-                        // Could add logging here
                     }
-                }
+                    break;
+
+                case Relationship::TYPE_MANY_TO_MANY:
+                    // For many-to-many relationships with join tables
+                    // This would require custom implementation based on your join table structure
+                    break;
             }
         }
     }
 
     /**
-     * Find entities by criteria
+     * Process cascade delete for one-to-many relationships in batches
      */
-    public function findBy(string $className, array $criteria = [], array $orderBy = [], int $limit = null, int $offset = 0): array
+    private function cascadeDeleteOneToMany(
+        string|int $entityId,
+        string $targetEntityClass,
+        string $targetEntityType,
+        string $mappedByField
+    ): void {
+        $offset = 0;
+        $hasMore = true;
+
+        while ($hasMore) {
+            // Query for a batch of related entities
+            $queryOptions = new QueryOptions($targetEntityType);
+            $queryOptions->addFilter(QueryFilter::eq($mappedByField . 'Id', $entityId));
+            $queryOptions->setLimit(self::BATCH_SIZE);
+            $queryOptions->setOffset($offset);
+
+            try {
+                $response = $this->client->query($queryOptions->toArray());
+
+                if (empty($response['data'])) {
+                    $hasMore = false;
+                } else {
+                    // Process this batch
+                    foreach ($response['data'] as $relatedEntityData) {
+                        $relatedId = $relatedEntityData['id'] ?? null;
+                        if ($relatedId) {
+                            try {
+                                $this->deleteById($targetEntityClass, $relatedId);
+                            } catch (\Throwable $e) {
+                                // Log error but continue with other entities
+                            }
+                        }
+                    }
+
+                    // If we got fewer results than the batch size, we're done
+                    if (count($response['data']) < self::BATCH_SIZE) {
+                        $hasMore = false;
+                    } else {
+                        $offset += self::BATCH_SIZE;
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Error querying, stop processing
+                $hasMore = false;
+            }
+
+            // Free memory
+            gc_collect_cycles();
+        }
+    }
+
+    /**
+     * Process cascade delete for one-to-one relationships
+     */
+    private function cascadeDeleteOneToOne(
+        string|int $entityId,
+        string $targetEntityClass,
+        string $targetEntityType,
+        string $mappedByField
+    ): void {
+        $queryOptions = new QueryOptions($targetEntityType);
+        $queryOptions->addFilter(QueryFilter::eq($mappedByField . 'Id', $entityId));
+        $queryOptions->setLimit(1);
+
+        try {
+            $response = $this->client->query($queryOptions->toArray());
+
+            if (!empty($response['data'][0])) {
+                $relatedId = $response['data'][0]['id'] ?? null;
+                if ($relatedId) {
+                    $this->deleteById($targetEntityClass, $relatedId);
+                }
+            }
+        } catch (\Throwable $e) {
+            // Entity not found or error, ignore
+        }
+    }
+
+    /**
+     * Find entities by criteria with batching support
+     */
+    public function findBy(string $className, array $criteria = [], array $orderBy = [], ?int $limit = null, int $offset = 0): array
     {
         // Get entity type from entity class
         $entityType = $this->entityTypeRegistry->getEntityType($className);
@@ -382,13 +419,15 @@ class SyncopateService
             throw new \InvalidArgumentException("Class $className is not registered as an entity");
         }
 
-        // Build query options
+        // If no limit specified or large limit, use batching
+        if ($limit === null || $limit > self::BATCH_SIZE) {
+            return $this->findByWithBatching($className, $entityType, $criteria, $orderBy, $limit, $offset);
+        }
+
+        // For small limits, use standard logic
         $queryOptions = new QueryOptions($entityType);
         $queryOptions->setOffset($offset);
-
-        if ($limit !== null) {
-            $queryOptions->setLimit($limit);
-        }
+        $queryOptions->setLimit($limit);
 
         // Add filters for criteria
         foreach ($criteria as $field => $value) {
@@ -418,6 +457,77 @@ class SyncopateService
     }
 
     /**
+     * Memory-optimized version that uses batching for large result sets
+     */
+    private function findByWithBatching(
+        string $className,
+        string $entityType,
+        array $criteria = [],
+        array $orderBy = [],
+        ?int $limit = null,
+        int $offset = 0
+    ): array {
+        $entities = [];
+        $currentOffset = $offset;
+        $remainingLimit = $limit;
+        $hasMore = true;
+
+        // Get results in batches
+        while ($hasMore) {
+            $batchSize = ($remainingLimit !== null && $remainingLimit < self::BATCH_SIZE)
+                ? $remainingLimit
+                : self::BATCH_SIZE;
+
+            $queryOptions = new QueryOptions($entityType);
+            $queryOptions->setOffset($currentOffset);
+            $queryOptions->setLimit($batchSize);
+
+            // Add filters for criteria
+            foreach ($criteria as $field => $value) {
+                $queryOptions->addFilter(QueryFilter::eq($field, $value));
+            }
+
+            // Add order by
+            if (!empty($orderBy)) {
+                $field = key($orderBy);
+                $direction = current($orderBy);
+                $queryOptions->setOrderBy($field);
+                $queryOptions->setOrderDesc($direction === 'DESC');
+            }
+
+            // Execute query
+            $response = $this->client->query($queryOptions->toArray());
+            $batchResults = $response['data'] ?? [];
+
+            // Process batch results
+            foreach ($batchResults as $entityData) {
+                $entities[] = $this->entityMapper->mapToObject($entityData, $className);
+            }
+
+            // Update state for next batch
+            $resultCount = count($batchResults);
+            $currentOffset += $resultCount;
+
+            if ($remainingLimit !== null) {
+                $remainingLimit -= $resultCount;
+            }
+
+            // Check if we've reached the end
+            if (
+                $resultCount < $batchSize ||
+                ($remainingLimit !== null && $remainingLimit <= 0)
+            ) {
+                $hasMore = false;
+            }
+
+            // Free memory
+            gc_collect_cycles();
+        }
+
+        return $entities;
+    }
+
+    /**
      * Find one entity by criteria
      */
     public function findOneBy(string $className, array $criteria = []): ?object
@@ -435,7 +545,7 @@ class SyncopateService
     }
 
     /**
-     * Execute a custom query
+     * Execute a custom query with memory-optimized batching support
      */
     public function query(string $className, QueryOptions $queryOptions): array
     {
@@ -451,6 +561,12 @@ class SyncopateService
             throw new \InvalidArgumentException("Query entity type does not match class entity type");
         }
 
+        // Check if we should use batching
+        $limit = $queryOptions->getLimit();
+        if ($limit === null || $limit > self::BATCH_SIZE) {
+            return $this->executeQueryWithBatching($className, $queryOptions);
+        }
+
         // Execute query
         $response = $this->client->query($queryOptions->toArray());
 
@@ -458,6 +574,61 @@ class SyncopateService
         $entities = [];
         foreach ($response['data'] as $entityData) {
             $entities[] = $this->entityMapper->mapToObject($entityData, $className);
+        }
+
+        return $entities;
+    }
+
+    /**
+     * Memory-optimized batched query execution
+     */
+    private function executeQueryWithBatching(string $className, QueryOptions $queryOptions): array
+    {
+        $entities = [];
+        $originalLimit = $queryOptions->getLimit();
+        $originalOffset = $queryOptions->getOffset();
+        $currentOffset = $originalOffset;
+        $remainingLimit = $originalLimit;
+        $hasMore = true;
+
+        // Clone query options to avoid modifying the original
+        $clonedOptions = clone $queryOptions;
+
+        while ($hasMore) {
+            $batchSize = ($remainingLimit !== null && $remainingLimit < self::BATCH_SIZE)
+                ? $remainingLimit
+                : self::BATCH_SIZE;
+
+            $clonedOptions->setOffset($currentOffset);
+            $clonedOptions->setLimit($batchSize);
+
+            // Execute query for this batch
+            $response = $this->client->query($clonedOptions->toArray());
+            $batchResults = $response['data'] ?? [];
+
+            // Process batch results
+            foreach ($batchResults as $entityData) {
+                $entities[] = $this->entityMapper->mapToObject($entityData, $className);
+            }
+
+            // Update state for next batch
+            $resultCount = count($batchResults);
+            $currentOffset += $resultCount;
+
+            if ($remainingLimit !== null) {
+                $remainingLimit -= $resultCount;
+            }
+
+            // Check if we've reached the end
+            if (
+                $resultCount < $batchSize ||
+                ($remainingLimit !== null && $remainingLimit <= 0)
+            ) {
+                $hasMore = false;
+            }
+
+            // Free memory
+            gc_collect_cycles();
         }
 
         return $entities;
@@ -489,8 +660,9 @@ class SyncopateService
 
         return $response['total'] ?? 0;
     }
+
     /**
-     * Execute a join query
+     * Execute a join query with batching support
      */
     public function joinQuery(string $className, JoinQueryOptions $joinQueryOptions): array
     {
@@ -506,10 +678,80 @@ class SyncopateService
             throw new \InvalidArgumentException("Query entity type does not match class entity type");
         }
 
+        // Check if we should use batching
+        $limit = $joinQueryOptions->getLimit();
+        if ($limit === null || $limit > self::BATCH_SIZE) {
+            return $this->executeJoinQueryWithBatching($className, $joinQueryOptions);
+        }
+
         // Execute join query
         $response = $this->client->joinQuery($joinQueryOptions->toArray());
 
         // Map results to entity objects
+        return $this->mapJoinQueryResults($response, $className);
+    }
+
+    /**
+     * Memory-optimized batched join query execution
+     */
+    private function executeJoinQueryWithBatching(string $className, JoinQueryOptions $joinQueryOptions): array
+    {
+        $entities = [];
+        $originalLimit = $joinQueryOptions->getLimit();
+        $originalOffset = $joinQueryOptions->getOffset();
+        $currentOffset = $originalOffset;
+        $remainingLimit = $originalLimit;
+        $hasMore = true;
+
+        // Clone query options to avoid modifying the original
+        $clonedOptions = clone $joinQueryOptions;
+
+        while ($hasMore) {
+            $batchSize = ($remainingLimit !== null && $remainingLimit < self::BATCH_SIZE)
+                ? $remainingLimit
+                : self::BATCH_SIZE;
+
+            $clonedOptions->setOffset($currentOffset);
+            $clonedOptions->setLimit($batchSize);
+
+            // Execute join query for this batch
+            $response = $this->client->joinQuery($clonedOptions->toArray());
+            $batchEntities = $this->mapJoinQueryResults($response, $className);
+
+            // Add batch results to main result set
+            foreach ($batchEntities as $entity) {
+                $entities[] = $entity;
+            }
+
+            // Update state for next batch
+            $resultCount = count($batchEntities);
+            $currentOffset += $resultCount;
+
+            if ($remainingLimit !== null) {
+                $remainingLimit -= $resultCount;
+            }
+
+            // Check if we've reached the end
+            if (
+                $resultCount < $batchSize ||
+                ($remainingLimit !== null && $remainingLimit <= 0)
+            ) {
+                $hasMore = false;
+            }
+
+            // Free memory
+            unset($batchEntities);
+            gc_collect_cycles();
+        }
+
+        return $entities;
+    }
+
+    /**
+     * Map join query results to entity objects
+     */
+    private function mapJoinQueryResults(array $response, string $className): array
+    {
         $entities = [];
         foreach ($response['data'] as $entityData) {
             $entity = $this->entityMapper->mapToObject($entityData, $className);
@@ -522,10 +764,13 @@ class SyncopateService
                 }
 
                 // This is a joined entity or collection
-                $reflection = new \ReflectionProperty($entity, $key);
-                if (!$reflection->isInitialized($entity)) {
+                if (property_exists($entity, $key)) {
+                    $reflection = new \ReflectionProperty($entity, $key);
                     $reflection->setAccessible(true);
-                    $reflection->setValue($entity, $value);
+
+                    if (!$reflection->isInitialized($entity)) {
+                        $reflection->setValue($entity, $value);
+                    }
                 }
             }
 

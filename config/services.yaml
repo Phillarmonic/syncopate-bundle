@@ -11,15 +11,40 @@ services:
             $baseUrl: '%phillarmonic_syncopate.base_url%'
             $defaultOptions:
                 timeout: '%phillarmonic_syncopate.timeout%'
+                # Memory optimization settings for HTTP client
+                buffer: false
+                max_duration: 600  # Increase timeout for large operations (10 minutes)
+                # Don't buffer in memory
+                on_progress: '@syncopate_response_progress_callback'
         public: true
 
-    # Http client with retry capability
+    # Response progress callback service to handle memory optimization
+    syncopate_response_progress_callback:
+        class: Closure
+        factory: ['Phillarmonic\SyncopateBundle\Service\HttpClientFactory', 'createProgressCallback']
+        # This callback helps release memory as chunks are processed
+
+    # Http client with retry capability and optimized memory settings
     syncopate_http_client:
         class: Symfony\Component\HttpClient\RetryableHttpClient
         arguments:
-            $client: '@http_client'
+            $client: '@syncopate_base_http_client'
             $strategy: '@syncopate_retry_strategy'
             $maxRetries: '%phillarmonic_syncopate.max_retries%'
+
+    # Base HTTP client with memory optimization
+    syncopate_base_http_client:
+        class: Symfony\Component\HttpClient\NativeHttpClient
+        arguments:
+            $defaultOptions:
+                max_redirects: 5
+                # Memory optimization settings
+                buffer: false  # Don't buffer whole response in memory
+                # Use temp files for handling large responses
+                headers:
+                    'Accept-Encoding': 'zstd, gzip, deflate'
+                    'Connection': 'keep-alive'
+                timeout: '%phillarmonic_syncopate.timeout%'
 
     # Retry strategy for an http client
     syncopate_retry_strategy:
@@ -31,13 +56,14 @@ services:
             - 60000                                              # $maxDelayMs
             - 0.1                                                # $jitter
 
-    # Entity type registry service
+    # Entity type registry service with lazy loading
     Phillarmonic\SyncopateBundle\Service\EntityTypeRegistry:
         arguments:
             $entityPaths: '%phillarmonic_syncopate.entity_paths%'
             $autoCreateEntityTypes: '%phillarmonic_syncopate.auto_create_entity_types%'
             $cacheEntityTypes: '%phillarmonic_syncopate.cache_entity_types%'
             $cacheTtl: '%phillarmonic_syncopate.cache_ttl%'
+        lazy: true  # Use lazy loading to avoid unnecessary initialization
         calls:
             - [initialize, []]
 
@@ -48,7 +74,7 @@ services:
             $entityTypeRegistry: '@Phillarmonic\SyncopateBundle\Service\EntityTypeRegistry'
         public: true
 
-    # Entity mapper
+    # Entity mapper with object caching
     Phillarmonic\SyncopateBundle\Mapper\EntityMapper:
         public: false
 
@@ -65,6 +91,11 @@ services:
 
     Phillarmonic\SyncopateBundle\Metadata\RelationshipMetadata:
         public: false
+        shared: false  # Create new instance each time to avoid memory issues
 
     Phillarmonic\SyncopateBundle\Service\RelationshipRegistry:
+        public: false
+
+    # Helper service for HTTP client factory
+    Phillarmonic\SyncopateBundle\Service\HttpClientFactory:
         public: false
