@@ -167,6 +167,7 @@ class RegisterEntityTypesCommand extends Command
         }
 
         // Register each entity type
+        $existing = 0;
         $registered = 0;
         $updated = 0;
         $failed = 0;
@@ -184,7 +185,8 @@ class RegisterEntityTypesCommand extends Command
                 $exists = in_array($entityType, $existingEntityTypes);
 
                 if ($exists && !$force) {
-                    // Skip existing entity types unless force option is used
+                    // Count existing entity types
+                    $existing++;
                     continue;
                 }
 
@@ -211,6 +213,7 @@ class RegisterEntityTypesCommand extends Command
         // Display summary
         $io->success([
             sprintf('Entity type registration complete.'),
+            sprintf('Existing: %d', $existing),
             sprintf('Registered: %d', $registered),
             sprintf('Updated: %d', $updated),
             sprintf('Failed: %d', $failed)
