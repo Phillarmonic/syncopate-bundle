@@ -15,6 +15,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Finder\Finder;
 use ReflectionClass;
 use Phillarmonic\SyncopateBundle\Attribute\Entity;
+use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 
 #[AsCommand(
     name: 'syncopate:register-entity-types',
@@ -26,18 +27,21 @@ class RegisterEntityTypesCommand extends Command
     private EntityMapper $entityMapper;
     private SyncopateClient $client;
     private SyncopateService $syncopateService;
+    private ParameterBagInterface $parameterBag;
 
     public function __construct(
         EntityTypeRegistry $entityTypeRegistry,
         EntityMapper $entityMapper,
         SyncopateClient $client,
-        SyncopateService $syncopateService
+        SyncopateService $syncopateService,
+        ParameterBagInterface $parameterBag
     ) {
         parent::__construct();
         $this->entityTypeRegistry = $entityTypeRegistry;
         $this->entityMapper = $entityMapper;
         $this->client = $client;
         $this->syncopateService = $syncopateService;
+        $this->parameterBag = $parameterBag;
     }
 
     protected function configure(): void
@@ -60,13 +64,25 @@ class RegisterEntityTypesCommand extends Command
                 'c',
                 InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY,
                 'Specific entity classes to register'
+            )
+            ->addOption(
+                'memory-limit',
+                'm',
+                InputOption::VALUE_REQUIRED,
+                'Memory limit for the process in MB (default: 128)',
+                128
             );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        // Set memory limit
+        $memoryLimit = $input->getOption('memory-limit');
+        ini_set('memory_limit', $memoryLimit . 'M');
+
         $io = new SymfonyStyle($input, $output);
         $io->title('SyncopateDB Entity Type Registration');
+        $io->comment("Memory limit set to {$memoryLimit}MB");
 
         // Check connection to SyncopateDB
         try {
@@ -118,7 +134,7 @@ class RegisterEntityTypesCommand extends Command
         } else {
             // Use registry's existing entity classes and scan additional paths
             $allPaths = array_merge(
-                $this->getRegistryPaths(),
+                $this->getEntityPaths(),
                 $additionalPaths
             );
 
@@ -132,6 +148,11 @@ class RegisterEntityTypesCommand extends Command
 
                 $finder = new Finder();
                 $finder->files()->in($path)->name('*.php');
+
+                // Process files in smaller batches
+                $batch = [];
+                $batchSize = 0;
+                $maxBatchSize = 50;
 
                 foreach ($finder as $file) {
                     $className = $this->getClassNameFromFile($file->getPathname(), $path);
@@ -150,6 +171,14 @@ class RegisterEntityTypesCommand extends Command
                     } catch (\Throwable $e) {
                         // Ignore invalid classes
                     }
+
+                    $batchSize++;
+
+                    // Free memory periodically
+                    if ($batchSize >= $maxBatchSize) {
+                        gc_collect_cycles();
+                        $batchSize = 0;
+                    }
                 }
             }
         }
@@ -166,39 +195,50 @@ class RegisterEntityTypesCommand extends Command
         $registered = 0;
         $updated = 0;
         $failed = 0;
+        $skipped = 0;
 
         $progressBar = $io->createProgressBar(count($entityClasses));
         $progressBar->start();
 
-        foreach ($entityClasses as $className) {
-            $progressBar->advance();
+        // Process in batches to manage memory
+        $batchSize = 10;
+        $batches = array_chunk($entityClasses, $batchSize);
 
-            try {
-                $entityDefinition = $this->entityMapper->extractEntityDefinition($className);
-                $entityType = $entityDefinition->getName();
+        foreach ($batches as $batch) {
+            foreach ($batch as $className) {
+                $progressBar->advance();
 
-                $exists = in_array($entityType, $existingEntityTypes);
+                try {
+                    $entityDefinition = $this->entityMapper->extractEntityDefinition($className);
+                    $entityType = $entityDefinition->getName();
 
-                if ($exists && !$force) {
-                    // Skip existing entity types unless force option is used
-                    continue;
+                    $exists = in_array($entityType, $existingEntityTypes);
+
+                    if ($exists && !$force) {
+                        // Skip existing entity types unless force option is used
+                        $skipped++;
+                        continue;
+                    }
+
+                    if ($exists) {
+                        // Update existing entity type
+                        $this->client->updateEntityType($entityType, $entityDefinition->toArray());
+                        $updated++;
+                    } else {
+                        // Create new entity type
+                        $this->client->createEntityType($entityDefinition->toArray());
+                        $registered++;
+                    }
+
+                } catch (\Throwable $e) {
+                    $io->newLine();
+                    $io->error(sprintf('Failed to register entity type for class %s: %s', $className, $e->getMessage()));
+                    $failed++;
                 }
-
-                if ($exists) {
-                    // Update existing entity type
-                    $this->client->updateEntityType($entityType, $entityDefinition->toArray());
-                    $updated++;
-                } else {
-                    // Create new entity type
-                    $this->client->createEntityType($entityDefinition->toArray());
-                    $registered++;
-                }
-
-            } catch (\Throwable $e) {
-                $io->newLine();
-                $io->error(sprintf('Failed to register entity type for class %s: %s', $className, $e->getMessage()));
-                $failed++;
             }
+
+            // Free memory after each batch
+            gc_collect_cycles();
         }
 
         $progressBar->finish();
@@ -209,20 +249,23 @@ class RegisterEntityTypesCommand extends Command
             sprintf('Entity type registration complete.'),
             sprintf('Registered: %d', $registered),
             sprintf('Updated: %d', $updated),
+            sprintf('Skipped: %d', $skipped),
             sprintf('Failed: %d', $failed)
         ]);
+
+        // Output memory usage
+        $memUsed = round(memory_get_peak_usage(true) / 1024 / 1024, 2);
+        $io->comment("Peak memory usage: {$memUsed}MB");
 
         return Command::SUCCESS;
     }
 
     /**
-     * Get paths configured in the entity type registry
+     * Get entity paths from the parameter bag instead of using reflection
      */
-    private function getRegistryPaths(): array
+    private function getEntityPaths(): array
     {
-        $reflection = new \ReflectionProperty($this->entityTypeRegistry, 'entityPaths');
-        $reflection->setAccessible(true);
-        return $reflection->getValue($this->entityTypeRegistry);
+        return $this->parameterBag->get('phillarmonic_syncopate.entity_paths');
     }
 
     /**
