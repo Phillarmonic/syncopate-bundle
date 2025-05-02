@@ -209,28 +209,42 @@ class SyncopateService
     private function processCascadeDelete(object $entity): void
     {
         $className = get_class($entity);
-        $relationshipMetadata = $this->relationshipRegistry->getRelationshipMetadata($className);
+        $reflection = new \ReflectionClass($className);
 
-        if (!$relationshipMetadata->hasCascadeDeleteRelationships()) {
-            return;
-        }
+        // Iterate through properties to find relationships with cascade delete
+        foreach ($reflection->getProperties() as $property) {
+            $relationshipAttributes = $property->getAttributes(Relationship::class);
 
-        foreach ($relationshipMetadata->getRelationships() as $relationshipName => $relationship) {
-            if ($relationship['cascade'] !== Relationship::CASCADE_REMOVE) {
+            if (empty($relationshipAttributes)) {
                 continue;
             }
 
-            $property = $relationship['property'];
+            /** @var Relationship $relationshipAttribute */
+            $relationshipAttribute = $relationshipAttributes[0]->newInstance();
+
+            // Only process properties with cascade="remove"
+            if ($relationshipAttribute->cascade !== Relationship::CASCADE_REMOVE) {
+                continue;
+            }
+
+            // Access the property value
             $property->setAccessible(true);
+
+            // Skip if the property hasn't been initialized
+            if (!$property->isInitialized($entity)) {
+                continue;
+            }
+
             $relatedData = $property->getValue($entity);
 
             if ($relatedData === null) {
                 continue;
             }
 
-            $targetEntityClass = $relationship['targetEntity'];
+            $targetEntityClass = $relationshipAttribute->targetEntity;
 
-            switch ($relationship['type']) {
+            // Handle based on relationship type
+            switch ($relationshipAttribute->type) {
                 case Relationship::TYPE_ONE_TO_ONE:
                 case Relationship::TYPE_MANY_TO_ONE:
                     // Single entity
@@ -247,7 +261,6 @@ class SyncopateService
             }
         }
     }
-
     /**
      * Find entities by criteria
      */
