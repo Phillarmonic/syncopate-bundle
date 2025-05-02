@@ -182,4 +182,12 @@ class SyncopateClient
             ];
         }
     }
+
+    /**
+     * Execute a join query.
+     */
+    public function joinQuery(array $joinQueryOptions): array
+    {
+        return $this->request('POST', '/api/v1/query/join', ['json' => $joinQueryOptions]);
+    }
 }
