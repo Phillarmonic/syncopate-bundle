@@ -809,25 +809,54 @@ class SyncopateService
                         $targetClass = $this->getRelationshipTargetClass($className, $key);
 
                         if ($targetClass) {
-                            // Create an instance of the target class and map properties
-                            $joinedEntity = new $targetClass();
+                            // Check if this is an array property (one-to-many relationship)
+                            $type = $reflection->getType();
+                            $isArrayProperty = ($type && $type->getName() === 'array');
 
-                            // Map each field to the joined entity
-                            foreach ($value as $fieldName => $fieldValue) {
-                                if (property_exists($joinedEntity, $fieldName)) {
-                                    $fieldReflection = new \ReflectionProperty($joinedEntity, $fieldName);
-                                    $fieldReflection->setAccessible(true);
-                                    $fieldReflection->setValue($joinedEntity, $fieldValue);
+                            if ($isArrayProperty) {
+                                // For array properties, initialize if not already set
+                                if (!$reflection->isInitialized($entity)) {
+                                    $reflection->setValue($entity, []);
                                 }
-                            }
 
-                            // Set the joined entity to the property
-                            $reflection->setValue($entity, $joinedEntity);
+                                // Get current array value
+                                $currentArray = $reflection->getValue($entity) ?: [];
+
+                                // Create a new instance for each item and add to array
+                                $joinedEntity = new $targetClass();
+                                foreach ($value as $fieldName => $fieldValue) {
+                                    if (property_exists($joinedEntity, $fieldName)) {
+                                        $fieldReflection = new \ReflectionProperty($joinedEntity, $fieldName);
+                                        $fieldReflection->setAccessible(true);
+                                        $fieldReflection->setValue($joinedEntity, $fieldValue);
+                                    }
+                                }
+
+                                // Add the new entity to the array
+                                $currentArray[] = $joinedEntity;
+
+                                // Set the updated array back to the property
+                                $reflection->setValue($entity, $currentArray);
+                            } else {
+                                // Create an instance of the target class and map properties
+                                $joinedEntity = new $targetClass();
+
+                                // Map each field to the joined entity
+                                foreach ($value as $fieldName => $fieldValue) {
+                                    if (property_exists($joinedEntity, $fieldName)) {
+                                        $fieldReflection = new \ReflectionProperty($joinedEntity, $fieldName);
+                                        $fieldReflection->setAccessible(true);
+                                        $fieldReflection->setValue($joinedEntity, $fieldValue);
+                                    }
+                                }
+
+                                // Set the joined entity to the property
+                                $reflection->setValue($entity, $joinedEntity);
+                            }
                         }
                     }
                 }
             }
-
             $entities[] = $entity;
         }
 
