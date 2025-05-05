@@ -2,8 +2,6 @@
 
 namespace Phillarmonic\SyncopateBundle\Trait;
 
-use Phillarmonic\SyncopateBundle\Attribute\Field;
-
 trait EntityTrait
 {
     /**
@@ -11,9 +9,10 @@ trait EntityTrait
      *
      * @param array|null $fields Only include these fields if specified
      * @param array $exclude Fields to exclude
+     * @param array $mapping Map original property names to custom keys in result
      * @return array
      */
-    public function toArray(?array $fields = null, array $exclude = []): array
+    public function toArray(?array $fields = null, array $exclude = [], array $mapping = []): array
     {
         $result = [];
         $reflection = new \ReflectionClass($this);
@@ -22,7 +21,11 @@ trait EntityTrait
         if ($reflection->hasProperty('id')) {
             $idProperty = $reflection->getProperty('id');
             $idProperty->setAccessible(true);
-            $result['id'] = $idProperty->getValue($this);
+            $idValue = $idProperty->getValue($this);
+
+            // Check if ID is in the mapping
+            $idKey = array_search('id', $mapping) ?: 'id';
+            $result[$idKey] = $idValue;
         }
 
         // Get all entity properties with Field attribute
@@ -40,7 +43,7 @@ trait EntityTrait
             }
 
             // Check if property has Field attribute
-            $fieldAttributes = $property->getAttributes(Field::class);
+            $fieldAttributes = $property->getAttributes(\Phillarmonic\SyncopateBundle\Attribute\Field::class);
             if (empty($fieldAttributes)) {
                 continue;
             }
@@ -49,17 +52,20 @@ trait EntityTrait
             $fieldAttribute = $fieldAttributes[0]->newInstance();
             $fieldName = $fieldAttribute->name ?? $propertyName;
 
+            // Apply mapping if exists
+            $resultKey = array_search($propertyName, $mapping) ?: $fieldName;
+
             // Get property value
             $property->setAccessible(true);
             $value = $property->getValue($this);
 
             // Handle special types (DateTime, related entities, etc.)
             if ($value instanceof \DateTimeInterface) {
-                $result[$fieldName] = $value->format(\DateTimeInterface::ATOM);
+                $result[$resultKey] = $value->format(\DateTimeInterface::ATOM);
             } elseif (is_object($value) && method_exists($value, 'toArray')) {
-                $result[$fieldName] = $value->toArray();
+                $result[$resultKey] = $value->toArray();
             } else {
-                $result[$fieldName] = $value;
+                $result[$resultKey] = $value;
             }
         }
 
@@ -70,21 +76,36 @@ trait EntityTrait
      * Extract only specified fields to an array
      *
      * @param array $fields Fields to include
+     * @param array $mapping Map original property names to custom keys in result
      * @return array
      */
-    public function extract(array $fields): array
+    public function extract(array $fields, array $mapping = []): array
     {
-        return $this->toArray($fields);
+        return $this->toArray($fields, [], $mapping);
     }
 
     /**
      * Extract all fields except specified ones
      *
      * @param array $exclude Fields to exclude
+     * @param array $mapping Map original property names to custom keys in result
      * @return array
      */
-    public function extractExcept(array $exclude): array
+    public function extractExcept(array $exclude, array $mapping = []): array
     {
-        return $this->toArray(null, $exclude);
+        return $this->toArray(null, $exclude, $mapping);
+    }
+
+    /**
+     * Extract fields with custom field name mapping
+     *
+     * @param array $mapping Map of 'resultKey' => 'propertyName'
+     * @return array
+     */
+    public function extractAs(array $mapping): array
+    {
+        // For extractAs, we only want to include the fields in the mapping
+        $fields = array_values($mapping);
+        return $this->toArray($fields, [], array_flip($mapping));
     }
 }
