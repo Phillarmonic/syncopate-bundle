@@ -15,6 +15,8 @@ class EntityTypeRegistry implements CacheWarmerInterface
 {
     private array $entityClasses = [];
     private array $entityDefinitions = [];
+    private array $entityTypeToClass = [];
+    private array $classToEntityType = [];
     private array $entityPaths;
     private bool $autoCreateEntityTypes;
     private bool $cacheEntityTypes;
@@ -23,6 +25,7 @@ class EntityTypeRegistry implements CacheWarmerInterface
     private SyncopateClient $client;
     private ?CacheItemPoolInterface $cache;
     private bool $initialized = false;
+    private bool $entitiesDiscovered = false;
 
     public function __construct(
         array $entityPaths,
@@ -42,59 +45,78 @@ class EntityTypeRegistry implements CacheWarmerInterface
         $this->cache = $cache;
     }
 
+    /**
+     * Initialize base entity mapping information but don't load all definitions yet
+     */
     public function initialize(): void
     {
         if ($this->initialized) {
             return;
         }
 
-        // Find all entity classes
-        $this->discoverEntityClasses();
-
-        // If cache is enabled, try to load from cache
+        // If cache is enabled, try to load mappings from cache
         if ($this->cacheEntityTypes && $this->cache !== null) {
-            $cacheItem = $this->cache->getItem('syncopate_entity_definitions');
+            $cacheItem = $this->cache->getItem('syncopate_entity_mappings');
             if ($cacheItem->isHit()) {
-                $this->entityDefinitions = $cacheItem->get();
+                $mappings = $cacheItem->get();
+                $this->entityTypeToClass = $mappings['typeToClass'] ?? [];
+                $this->classToEntityType = $mappings['classToType'] ?? [];
+                $this->entitiesDiscovered = true;
                 $this->initialized = true;
                 return;
             }
         }
 
-        // Load entity type definitions from SyncopateDB or create them if needed
-        $this->loadOrCreateEntityDefinitions();
-
-        // Cache entity definitions if enabled
-        if ($this->cacheEntityTypes && $this->cache !== null) {
-            $cacheItem = $this->cache->getItem('syncopate_entity_definitions');
-            $cacheItem->set($this->entityDefinitions);
-            $cacheItem->expiresAfter($this->cacheTtl);
-            $this->cache->save($cacheItem);
-        }
-
         $this->initialized = true;
     }
 
+    /**
+     * Get entity definition lazily
+     */
     public function getEntityDefinition(string $entityType): ?EntityDefinition
     {
         if (!$this->initialized) {
             $this->initialize();
         }
 
-        return $this->entityDefinitions[$entityType] ?? null;
+        // If we already have this definition, return it
+        if (isset($this->entityDefinitions[$entityType])) {
+            return $this->entityDefinitions[$entityType];
+        }
+
+        // Try to load from SyncopateDB
+        try {
+            $data = $this->client->getEntityType($entityType);
+            $definition = EntityDefinition::fromArray($data);
+            $this->entityDefinitions[$entityType] = $definition;
+            return $definition;
+        } catch (\Throwable $e) {
+            // If it doesn't exist and we have a class for it, try to create it
+            if ($this->autoCreateEntityTypes && isset($this->entityTypeToClass[$entityType])) {
+                return $this->createEntityTypeFromClass($this->entityTypeToClass[$entityType]);
+            }
+        }
+
+        return null;
     }
 
+    /**
+     * Get entity type from class name
+     */
     public function getEntityType(string $className): ?string
     {
         if (!$this->initialized) {
             $this->initialize();
         }
 
-        // If we already have this class, return its entity type
-        foreach ($this->entityClasses as $entityType => $class) {
-            if ($class === $className) {
-                return $entityType;
-            }
+        // Make sure entities are discovered
+        if (!$this->entitiesDiscovered) {
+            $this->discoverEntityClasses();
+        }
+
+        // If we already know this class, return its entity type
+        if (isset($this->classToEntityType[$className])) {
+            return $this->classToEntityType[$className];
         }
 
         // If not found, try to extract from the class
@@ -107,28 +129,51 @@ class EntityTypeRegistry implements CacheWarmerInterface
 
             /** @var Entity $entityAttribute */
             $entityAttribute = $attributes[0]->newInstance();
-            return $entityAttribute->name ?? $this->getDefaultEntityName($reflection);
+            $entityType = $entityAttribute->name ?? $this->getDefaultEntityName($reflection);
+
+            // Add to our mappings
+            $this->classToEntityType[$className] = $entityType;
+            $this->entityTypeToClass[$entityType] = $className;
+
+            return $entityType;
         } catch (\Throwable $e) {
             return null;
         }
     }
 
+    /**
+     * Get entity class from entity type
+     */
     public function getEntityClass(string $entityType): ?string
     {
         if (!$this->initialized) {
             $this->initialize();
         }
 
-        return $this->entityClasses[$entityType] ?? null;
+        // Make sure entities are discovered
+        if (!$this->entitiesDiscovered) {
+            $this->discoverEntityClasses();
+        }
+
+        return $this->entityTypeToClass[$entityType] ?? null;
     }
 
+    /**
+     * Get all entity types
+     */
     public function getAllEntityTypes(): array
     {
         if (!$this->initialized) {
             $this->initialize();
         }
 
-        return array_keys($this->entityClasses);
+        // Make sure entities are discovered
+        if (!$this->entitiesDiscovered) {
+            $this->discoverEntityClasses();
+        }
+
+        // Return just the keys from our map
+        return array_keys($this->entityTypeToClass);
     }
 
     /**
@@ -145,6 +190,14 @@ class EntityTypeRegistry implements CacheWarmerInterface
     public function warmUp(string $cacheDir, ?string $buildDir = null): array
     {
         $this->initialize();
+        $this->discoverEntityClasses();
+
+        // Preload common entity definitions for faster startup
+        $entityTypes = array_keys($this->entityTypeToClass);
+        foreach (array_slice($entityTypes, 0, 10) as $entityType) {
+            $this->getEntityDefinition($entityType);
+        }
+
         return [];
     }
 
@@ -153,6 +206,10 @@ class EntityTypeRegistry implements CacheWarmerInterface
      */
     private function discoverEntityClasses(): void
     {
+        if ($this->entitiesDiscovered) {
+            return;
+        }
+
         foreach ($this->entityPaths as $path) {
             if (!is_dir($path)) {
                 continue;
@@ -174,7 +231,10 @@ class EntityTypeRegistry implements CacheWarmerInterface
                         /** @var Entity $entityAttribute */
                         $entityAttribute = $attributes[0]->newInstance();
                         $entityType = $entityAttribute->name ?? $this->getDefaultEntityName($reflection);
-                        $this->entityClasses[$entityType] = $className;
+
+                        // Add to mappings
+                        $this->classToEntityType[$className] = $entityType;
+                        $this->entityTypeToClass[$entityType] = $className;
                     }
                 } catch (\Throwable $e) {
                     // Ignore invalid classes
@@ -182,57 +242,25 @@ class EntityTypeRegistry implements CacheWarmerInterface
                 }
             }
         }
-    }
 
-    /**
-     * Load entity definitions from SyncopateDB or create them if needed
-     */
-    private function loadOrCreateEntityDefinitions(): void
-    {
-        // First, try to get all entity types from SyncopateDB
-        try {
-            $entityTypes = $this->client->getEntityTypes();
-
-            // Create a map of entity type names to their definitions
-            $existingEntityTypes = [];
-            foreach ($entityTypes as $entityType) {
-                try {
-                    $definition = $this->client->getEntityType($entityType);
-                    $existingEntityTypes[$entityType] = EntityDefinition::fromArray($definition);
-                } catch (\Throwable $e) {
-                    // Skip if we can't load the definition
-                    continue;
-                }
-            }
-
-            // Check each of our entity classes
-            foreach ($this->entityClasses as $entityType => $className) {
-                if (isset($existingEntityTypes[$entityType])) {
-                    // Entity type already exists in SyncopateDB
-                    $this->entityDefinitions[$entityType] = $existingEntityTypes[$entityType];
-                } elseif ($this->autoCreateEntityTypes) {
-                    // Entity type doesn't exist, create it
-                    $this->createEntityType($className);
-                }
-            }
-        } catch (\Throwable $e) {
-            // If we can't connect to SyncopateDB, extract definitions locally
-            foreach ($this->entityClasses as $entityType => $className) {
-                try {
-                    $definition = $this->entityMapper->extractEntityDefinition($className);
-                    $this->entityDefinitions[$entityType] = $definition;
-                } catch (\Throwable $innerE) {
-                    // Skip if we can't extract the definition
-                    continue;
-                }
-            }
+        // Cache entity mappings if enabled
+        if ($this->cacheEntityTypes && $this->cache !== null) {
+            $cacheItem = $this->cache->getItem('syncopate_entity_mappings');
+            $cacheItem->set([
+                'typeToClass' => $this->entityTypeToClass,
+                'classToType' => $this->classToEntityType,
+            ]);
+            $cacheItem->expiresAfter($this->cacheTtl);
+            $this->cache->save($cacheItem);
         }
+
+        $this->entitiesDiscovered = true;
     }
 
     /**
      * Create an entity type in SyncopateDB
      */
-    private function createEntityType(string $className): void
+    private function createEntityTypeFromClass(string $className): ?EntityDefinition
     {
         try {
             $definition = $this->entityMapper->extractEntityDefinition($className);
@@ -240,13 +268,16 @@ class EntityTypeRegistry implements CacheWarmerInterface
 
             // Store the definition that was actually created
             if (isset($response['entityType'])) {
-                $this->entityDefinitions[$definition->getName()] = EntityDefinition::fromArray($response['entityType']);
+                $createdDefinition = EntityDefinition::fromArray($response['entityType']);
+                $this->entityDefinitions[$definition->getName()] = $createdDefinition;
+                return $createdDefinition;
             } else {
                 $this->entityDefinitions[$definition->getName()] = $definition;
+                return $definition;
             }
         } catch (SyncopateApiException $e) {
             // Log the error or handle it as needed
-            // For now, we'll just skip creating this entity type
+            return null;
         }
     }
 

@@ -68,15 +68,15 @@ class EntityMapper
     }
 
     /**
-     * Map entity data to a PHP object
+     * Map entity data to a PHP object with memory optimization
      */
     public function mapToObject(array $entityData, string $className): object
     {
         $reflection = new ReflectionClass($className);
         $object = $reflection->newInstanceWithoutConstructor();
 
-        if (!isset($entityData['id']) || !isset($entityData['fields'])) {
-            throw new \InvalidArgumentException("Invalid entity data structure");
+        if (!isset($entityData['id'])) {
+            throw new \InvalidArgumentException("Invalid entity data structure: missing 'id'");
         }
 
         // Map ID to special property if it exists
@@ -86,33 +86,36 @@ class EntityMapper
             $idProperty->setValue($object, $entityData['id']);
         }
 
-        // Map fields to properties
-        foreach ($reflection->getProperties() as $property) {
-            $fieldAttributes = $property->getAttributes(Field::class);
-            if (empty($fieldAttributes)) {
-                continue;
+        // Map fields to properties - only process fields that exist
+        if (isset($entityData['fields']) && is_array($entityData['fields'])) {
+            $propertyMap = $this->buildPropertyMap($reflection);
+
+            foreach ($entityData['fields'] as $fieldName => $value) {
+                // Skip if field not mapped to property
+                if (!isset($propertyMap[$fieldName])) {
+                    continue;
+                }
+
+                $property = $propertyMap[$fieldName]['property'];
+                $fieldAttribute = $propertyMap[$fieldName]['attribute'];
+
+                // Convert value based on property type
+                $value = $this->convertValueForPhp($value, $property);
+
+                // Set property value
+                $property->setAccessible(true);
+                $property->setValue($object, $value);
             }
-
-            /** @var Field $fieldAttribute */
-            $fieldAttribute = $fieldAttributes[0]->newInstance();
-            $fieldName = $fieldAttribute->name ?? $property->getName();
-
-            if (!isset($entityData['fields'][$fieldName])) {
-                continue;
-            }
-
-            $value = $entityData['fields'][$fieldName];
-            $value = $this->convertValueForPhp($value, $property);
-
-            $property->setAccessible(true);
-            $property->setValue($object, $value);
         }
+
+        // Free memory
+        gc_collect_cycles();
 
         return $object;
     }
 
     /**
-     * Map PHP object to entity data
+     * Map PHP object to entity data with memory optimization
      */
     public function mapFromObject(object $object): array
     {
@@ -131,23 +134,28 @@ class EntityMapper
         }
 
         $fields = [];
-        foreach ($reflection->getProperties() as $property) {
+
+        // Only process Field-annotated properties
+        $properties = $this->getFieldAnnotatedProperties($reflection);
+
+        foreach ($properties as $property) {
             // Skip id property as it's handled separately
-            if ($property->getName() === 'id') {
+            if ($property['property']->getName() === 'id') {
                 continue;
             }
 
-            $fieldAttributes = $property->getAttributes(Field::class);
-            if (empty($fieldAttributes)) {
+            $fieldProperty = $property['property'];
+            $fieldAttribute = $property['attribute'];
+            $fieldName = $fieldAttribute->name ?? $fieldProperty->getName();
+
+            $fieldProperty->setAccessible(true);
+
+            // Skip properties that aren't initialized
+            if (!$fieldProperty->isInitialized($object)) {
                 continue;
             }
 
-            /** @var Field $fieldAttribute */
-            $fieldAttribute = $fieldAttributes[0]->newInstance();
-            $fieldName = $fieldAttribute->name ?? $property->getName();
-
-            $property->setAccessible(true);
-            $value = $property->getValue($object);
+            $value = $fieldProperty->getValue($object);
 
             // Skip null values if not required
             if ($value === null && !$fieldAttribute->required) {
@@ -179,21 +187,33 @@ class EntityMapper
         $exception = SyncopateValidationException::create();
         $hasViolations = false;
 
-        foreach ($reflection->getProperties() as $property) {
-            $fieldAttributes = $property->getAttributes(Field::class);
-            if (empty($fieldAttributes)) {
+        // Only process Field-annotated properties for validation
+        $properties = $this->getFieldAnnotatedProperties($reflection);
+
+        foreach ($properties as $property) {
+            $fieldProperty = $property['property'];
+            $fieldAttribute = $property['attribute'];
+
+            $fieldProperty->setAccessible(true);
+
+            // Skip validation for uninitialized properties on non-required fields
+            if (!$fieldProperty->isInitialized($object)) {
+                if ($fieldAttribute->required) {
+                    $exception->addViolation(
+                        $fieldProperty->getName(),
+                        "Field is required but not initialized"
+                    );
+                    $hasViolations = true;
+                }
                 continue;
             }
 
-            /** @var Field $fieldAttribute */
-            $fieldAttribute = $fieldAttributes[0]->newInstance();
-            $property->setAccessible(true);
-            $value = $property->getValue($object);
+            $value = $fieldProperty->getValue($object);
 
             // Check required fields
             if ($fieldAttribute->required && $value === null) {
                 $exception->addViolation(
-                    $property->getName(),
+                    $fieldProperty->getName(),
                     "Field is required"
                 );
                 $hasViolations = true;
@@ -202,7 +222,7 @@ class EntityMapper
             // Check nullable fields
             if (!$fieldAttribute->nullable && $value === null) {
                 $exception->addViolation(
-                    $property->getName(),
+                    $fieldProperty->getName(),
                     "Field cannot be null"
                 );
                 $hasViolations = true;
@@ -212,6 +232,75 @@ class EntityMapper
         if ($hasViolations) {
             throw $exception;
         }
+    }
+
+    /**
+     * Cache for field-annotated properties to avoid repeated reflection
+     */
+    private array $propertyCache = [];
+
+    /**
+     * Clear property cache to free memory
+     */
+    public function clearCache(): void
+    {
+        $this->propertyCache = [];
+    }
+
+    /**
+     * Get all properties with Field attribute
+     */
+    private function getFieldAnnotatedProperties(ReflectionClass $reflection): array
+    {
+        $className = $reflection->getName();
+
+        if (isset($this->propertyCache[$className])) {
+            return $this->propertyCache[$className];
+        }
+
+        $results = [];
+
+        foreach ($reflection->getProperties() as $property) {
+            $fieldAttributes = $property->getAttributes(Field::class);
+            if (empty($fieldAttributes)) {
+                continue;
+            }
+
+            /** @var Field $fieldAttribute */
+            $fieldAttribute = $fieldAttributes[0]->newInstance();
+
+            $results[] = [
+                'property' => $property,
+                'attribute' => $fieldAttribute
+            ];
+        }
+
+        // Cache results for this class
+        $this->propertyCache[$className] = $results;
+
+        return $results;
+    }
+
+    /**
+     * Build a map of field names to properties for faster lookups
+     */
+    private function buildPropertyMap(ReflectionClass $reflection): array
+    {
+        $map = [];
+        $properties = $this->getFieldAnnotatedProperties($reflection);
+
+        foreach ($properties as $property) {
+            $fieldProperty = $property['property'];
+            $fieldAttribute = $property['attribute'];
+            $fieldName = $fieldAttribute->name ?? $fieldProperty->getName();
+
+            $map[$fieldName] = [
+                'property' => $fieldProperty,
+                'attribute' => $fieldAttribute
+            ];
+        }
+
+        return $map;
     }
 
     /**
@@ -255,10 +344,8 @@ class EntityMapper
         $typeName = $type->getName();
 
         // Handle date/time conversions
-        if (in_array($typeName, ['DateTime', '\DateTime', 'DateTimeInterface', '\DateTimeInterface'])) {
-            if (is_string($value)) {
-                return new DateTime($value);
-            }
+        if (in_array($typeName, ['DateTime', '\DateTime', 'DateTimeInterface', '\DateTimeInterface']) && is_string($value)) {
+            return new DateTime($value);
         }
 
         // Handle boolean conversions
@@ -301,8 +388,10 @@ class EntityMapper
             if (method_exists($value, '__toString')) {
                 return (string) $value;
             }
-            // Last resort, convert to array
-            return json_decode(json_encode($value), true);
+
+            // Use json_encode/decode for simple conversion without deep nesting
+            // to avoid memory issues with deep objects
+            return json_decode(json_encode($value, JSON_PARTIAL_OUTPUT_ON_ERROR), true);
         }
 
         return $value;

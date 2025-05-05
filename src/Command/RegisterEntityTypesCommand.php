@@ -15,6 +15,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Finder\Finder;
 use ReflectionClass;
 use Phillarmonic\SyncopateBundle\Attribute\Entity;
+use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 
 #[AsCommand(
     name: 'syncopate:register-entity-types',
@@ -26,18 +27,21 @@ class RegisterEntityTypesCommand extends Command
     private EntityMapper $entityMapper;
     private SyncopateClient $client;
     private SyncopateService $syncopateService;
+    private ParameterBagInterface $parameterBag;
 
     public function __construct(
         EntityTypeRegistry $entityTypeRegistry,
         EntityMapper $entityMapper,
         SyncopateClient $client,
-        SyncopateService $syncopateService
+        SyncopateService $syncopateService,
+        ParameterBagInterface $parameterBag
     ) {
         parent::__construct();
         $this->entityTypeRegistry = $entityTypeRegistry;
         $this->entityMapper = $entityMapper;
         $this->client = $client;
         $this->syncopateService = $syncopateService;
+        $this->parameterBag = $parameterBag;
     }
 
     protected function configure(): void
@@ -163,6 +167,7 @@ class RegisterEntityTypesCommand extends Command
         }
 
         // Register each entity type
+        $existing = 0;
         $registered = 0;
         $updated = 0;
         $failed = 0;
@@ -180,7 +185,8 @@ class RegisterEntityTypesCommand extends Command
                 $exists = in_array($entityType, $existingEntityTypes);
 
                 if ($exists && !$force) {
-                    // Skip existing entity types unless force option is used
+                    // Count existing entity types
+                    $existing++;
                     continue;
                 }
 
@@ -207,6 +213,7 @@ class RegisterEntityTypesCommand extends Command
         // Display summary
         $io->success([
             sprintf('Entity type registration complete.'),
+            sprintf('Existing: %d', $existing),
             sprintf('Registered: %d', $registered),
             sprintf('Updated: %d', $updated),
             sprintf('Failed: %d', $failed)
@@ -220,9 +227,8 @@ class RegisterEntityTypesCommand extends Command
      */
     private function getRegistryPaths(): array
     {
-        $reflection = new \ReflectionProperty($this->entityTypeRegistry, 'entityPaths');
-        $reflection->setAccessible(true);
-        return $reflection->getValue($this->entityTypeRegistry);
+        // Use parameter bag instead of reflection to avoid issues with lazy loading
+        return $this->parameterBag->get('phillarmonic_syncopate.entity_paths');
     }
 
     /**
