@@ -10,7 +10,7 @@ class QueryBuilder
 {
     private SyncopateService $syncopateService;
     private string $entityClass;
-    private string $entityType;
+    protected string $entityType;
     private array $filters = [];
     private ?string $orderBy = null;
     private bool $orderDesc = false;
@@ -245,6 +245,14 @@ class QueryBuilder
         $this->limit(1);
         $results = $this->getResult();
         return !empty($results) ? $results[0] : null;
+    }
+
+    /**
+     * Get the entity type for this query builder
+     */
+    public function getEntityType(): string
+    {
+        return $this->entityType;
     }
 
     /**
