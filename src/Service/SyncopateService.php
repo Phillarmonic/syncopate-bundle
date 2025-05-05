@@ -768,26 +768,91 @@ class SyncopateService
                     $reflection = new \ReflectionProperty($entity, $key);
                     $reflection->setAccessible(true);
 
-                    if (!$reflection->isInitialized($entity)) {
+                    // Check if this is an array property (collection)
+                    $type = $reflection->getType();
+                    $isArrayProperty = ($type && $type->getName() === 'array');
+
+                    if ($isArrayProperty && is_array($value)) {
+                        // Get a target class for this relationship
+                        $targetClass = $this->getRelationshipTargetClass($className, $key);
+
+                        // Skip if no target class found
+                        if (!$targetClass) {
+                            continue;
+                        }
+
+                        // Initialize an empty collection
+                        $collection = [];
+
+                        // If the value is a collection (indexed array of items)
+                        if (array_key_exists(0, $value)) {
+                            // Process each item in the collection
+                            foreach ($value as $itemData) {
+                                $targetEntity = $this->createRelatedEntity($targetClass, $itemData);
+                                if ($targetEntity !== null) {
+                                    $collection[] = $targetEntity;
+                                }
+                            }
+                        }
+
+                        // Set the collection to the property
+                        $reflection->setValue($entity, $collection);
+                    } else if (!$isArrayProperty && !is_array($value)) {
+                        // For non-array properties, set the value directly
                         $reflection->setValue($entity, $value);
                     }
                 }
             }
 
-            // Also check inside 'fields' for nested joined data
+            // Process joined data in fields array
             if (isset($entityData['fields']) && is_array($entityData['fields'])) {
                 foreach ($entityData['fields'] as $key => $value) {
-                    // If this looks like a joined entity (is an array and not a scalar value)
-                    if (is_array($value) && !empty($value) && property_exists($entity, $key)) {
-                        $reflection = new \ReflectionProperty($entity, $key);
-                        $reflection->setAccessible(true);
+                    // Skip if not a joined entity or collection
+                    if (!property_exists($entity, $key) || !is_array($value)) {
+                        continue;
+                    }
 
-                        // Map the joined entity to the appropriate type
-                        // You'll need to implement or use a method to determine the target class
-                        $targetClass = $this->getTargetClassForProperty($className, $key);
+                    $reflection = new \ReflectionProperty($entity, $key);
+                    $reflection->setAccessible(true);
+
+                    // Check if this is an array property (collection)
+                    $type = $reflection->getType();
+                    $isArrayProperty = ($type && $type->getName() === 'array');
+
+                    if ($isArrayProperty) {
+                        // Get target class for this relationship
+                        $targetClass = $this->getRelationshipTargetClass($className, $key);
+
+                        // Skip if no target class found
+                        if (!$targetClass) {
+                            continue;
+                        }
+
+                        // Initialize an empty collection
+                        $collection = [];
+
+                        // If the value is a collection (indexed array of items)
+                        if (array_key_exists(0, $value)) {
+                            // Process each item in the collection
+                            foreach ($value as $itemData) {
+                                $targetEntity = $this->createRelatedEntity($targetClass, $itemData);
+                                if ($targetEntity !== null) {
+                                    $collection[] = $targetEntity;
+                                }
+                            }
+                        }
+
+                        // Set the collection to the property
+                        $reflection->setValue($entity, $collection);
+                    } else {
+                        // For single entity relationships
+                        $targetClass = $this->getRelationshipTargetClass($className, $key);
+
                         if ($targetClass) {
-                            $joinedEntity = $this->entityMapper->mapToObject($value, $targetClass);
-                            $reflection->setValue($entity, $joinedEntity);
+                            $targetEntity = $this->createRelatedEntity($targetClass, $value);
+                            if ($targetEntity !== null) {
+                                $reflection->setValue($entity, $targetEntity);
+                            }
                         }
                     }
                 }
@@ -799,8 +864,50 @@ class SyncopateService
         return $entities;
     }
 
-    // Helper method to determine the target class for a property
-    private function getTargetClassForProperty(string $className, string $propertyName): ?string
+    /**
+     * Create a related entity object from data
+     */
+    private function createRelatedEntity(string $className, array $data): ?object
+    {
+        try {
+            $entity = new $className();
+            $reflection = new \ReflectionClass($className);
+
+            // Map data to entity properties
+            foreach ($reflection->getProperties() as $property) {
+                $property->setAccessible(true);
+                $propertyName = $property->getName();
+
+                // Try different naming conventions
+                if (array_key_exists($propertyName, $data)) {
+                    // Direct match
+                    $property->setValue($entity, $data[$propertyName]);
+                } else {
+                    // Try field name from attribute
+                    $fieldName = $this->getFieldNameFromProperty($property);
+                    if ($fieldName && array_key_exists($fieldName, $data)) {
+                        $property->setValue($entity, $data[$fieldName]);
+                    } else {
+                        // Try snake_case version
+                        $snakeName = $this->camelToSnake($propertyName);
+                        if (array_key_exists($snakeName, $data)) {
+                            $property->setValue($entity, $data[$snakeName]);
+                        }
+                    }
+                }
+            }
+
+            return $entity;
+        } catch (\Throwable $e) {
+            // Log error if needed
+            return null;
+        }
+    }
+
+    /**
+     * Get the target entity class for a relationship property
+     */
+    private function getRelationshipTargetClass(string $className, string $propertyName): ?string
     {
         try {
             $reflection = new \ReflectionClass($className);
@@ -809,16 +916,48 @@ class SyncopateService
             }
 
             $property = $reflection->getProperty($propertyName);
-            $relationshipAttributes = $property->getAttributes(\Phillarmonic\SyncopateBundle\Attribute\Relationship::class);
+            $relationshipAttributes = $property->getAttributes(Relationship::class);
 
             if (empty($relationshipAttributes)) {
                 return null;
             }
 
+            /** @var Relationship $relationshipAttribute */
             $relationshipAttribute = $relationshipAttributes[0]->newInstance();
             return $relationshipAttribute->targetEntity;
         } catch (\Throwable $e) {
+            // Log the error
             return null;
         }
+    }
+
+    /**
+     * Helper method to convert snake_case to camelCase
+     */
+    private function snakeToCamel(string $input): string
+    {
+        return lcfirst(str_replace('_', '', ucwords($input, '_')));
+    }
+
+    /**
+     * Helper method to convert camelCase to snake_case
+     */
+    private function camelToSnake(string $input): string
+    {
+        return strtolower(preg_replace('/(?<!^)[A-Z]/', '_$0', $input));
+    }
+
+    /**
+     * Get field name from property using Field attribute
+     */
+    private function getFieldNameFromProperty(\ReflectionProperty $property): ?string
+    {
+        $attributes = $property->getAttributes(\Phillarmonic\SyncopateBundle\Attribute\Field::class);
+        if (empty($attributes)) {
+            return null;
+        }
+
+        $fieldAttr = $attributes[0]->newInstance();
+        return $fieldAttr->name;
     }
 }

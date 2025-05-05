@@ -60,10 +60,13 @@ namespace App\Entity;
 use Phillarmonic\SyncopateBundle\Attribute\Entity;
 use Phillarmonic\SyncopateBundle\Attribute\Field;
 use Phillarmonic\SyncopateBundle\Model\EntityDefinition;
+use Phillarmonic\SyncopateBundle\Trait\EntityTrait;
 
 #[Entity(name: 'product', idGenerator: EntityDefinition::ID_TYPE_UUID)]
 class Product
 {
+    use EntityTrait; // Include the EntityTrait to add array conversion methods
+    
     public ?string $id = null;
 
     #[Field(type: 'string', indexed: true, required: true)]
@@ -88,6 +91,39 @@ class Product
 }
 ```
 
+### Entity Serialization with EntityTrait
+
+The `EntityTrait` provides convenient methods to convert your entities to arrays with fine-grained control:
+
+```php
+// Get all fields
+$allFields = $product->toArray();
+
+// Get only specific fields
+$simpleData = $product->extract(fields: ['name', 'price']);
+
+// Get all fields except specified ones
+$withoutDescription = $product->extractExcept(exclude: ['description']);
+
+// Get fields with custom key mapping
+$renamedFields = $product->toArray(
+    fields: null, 
+    exclude: [], 
+    mapping: [
+        'name' => 'productName',
+        'price' => 'cost'
+    ]
+);
+// Result: ['id' => '123', 'productName' => 'Product Name', 'cost' => 19.99, ...]
+```
+
+The `toArray()` method has three optional parameters:
+- `$fields` - When provided, only these fields will be included
+- `$exclude` - Fields to exclude from the result
+- `$mapping` - Maps property names to custom keys in the result
+
+This is particularly useful for API responses, where you might need to transform your internal data model to match external API conventions.
+
 ### Entity Relationships
 
 SyncopateBundle supports entity relationships with cascade operations:
@@ -100,11 +136,14 @@ namespace App\Entity;
 use Phillarmonic\SyncopateBundle\Attribute\Entity;
 use Phillarmonic\SyncopateBundle\Attribute\Field;
 use Phillarmonic\SyncopateBundle\Attribute\Relationship;
+use Phillarmonic\SyncopateBundle\Trait\EntityTrait;
 use DateTimeInterface;
 
 #[Entity]
 class Post
 {
+    use EntityTrait;
+    
     #[Field]
     private ?int $id = null;
 
@@ -132,6 +171,8 @@ class Post
 #[Entity]
 class Comment
 {
+    use EntityTrait;
+    
     #[Field]
     private ?int $id = null;
 
@@ -163,6 +204,107 @@ Cascade options:
 - `CASCADE_NONE`: No cascading actions (default)
 - `CASCADE_REMOVE`: Automatically delete related entities when the parent is deleted
 
+### Custom Repositories
+
+SyncopateBundle supports entity-specific repositories that allow you to define custom query methods for each entity:
+
+#### 1. Create a Custom Repository Class
+
+```php
+<?php
+
+namespace App\Repository;
+
+use App\Entity\Product;
+use Phillarmonic\SyncopateBundle\Repository\EntityRepository;
+
+class ProductRepository extends EntityRepository
+{
+    /**
+     * Find products in a specific price range
+     */
+    public function findByPriceRange(float $minPrice, float $maxPrice): array
+    {
+        return $this->createQueryBuilder()
+            ->gte(field: 'price', value: $minPrice)
+            ->lte(field: 'price', value: $maxPrice)
+            ->orderBy(field: 'price', direction: 'ASC')
+            ->getResult();
+    }
+    
+    /**
+     * Find featured products
+     */
+    public function findFeaturedProducts(int $limit = 5): array
+    {
+        return $this->createQueryBuilder()
+            ->eq(field: 'featured', value: true)
+            ->gt(field: 'stock', value: 0)
+            ->orderBy(field: 'price', direction: 'ASC')
+            ->limit(limit: $limit)
+            ->getResult();
+    }
+    
+    /**
+     * Get products formatted for API response
+     */
+    public function getProductsForApi(): array
+    {
+        $products = $this->findAll();
+        
+        return array_map(function(Product $product) {
+            return $product->toArray(
+                mapping: [
+                    'id' => 'productId',
+                    'price' => 'unitPrice',
+                    'stock' => 'availableQuantity'
+                ]
+            );
+        }, $products);
+    }
+}
+```
+
+#### 2. Specify the Repository Class in Your Entity
+
+```php
+<?php
+
+namespace App\Entity;
+
+use App\Repository\ProductRepository;
+use Phillarmonic\SyncopateBundle\Attribute\Entity;
+use Phillarmonic\SyncopateBundle\Attribute\Field;
+use Phillarmonic\SyncopateBundle\Model\EntityDefinition;
+use Phillarmonic\SyncopateBundle\Trait\EntityTrait;
+
+#[Entity(
+    name: 'product', 
+    idGenerator: EntityDefinition::ID_TYPE_UUID,
+    repositoryClass: ProductRepository::class
+)]
+class Product
+{
+    use EntityTrait;
+    
+    // ... property definitions
+}
+```
+
+#### 3. Use Your Custom Repository Methods
+
+```php
+// In a controller or service
+$repository = $this->repositoryFactory->getRepository(Product::class);
+
+// Use custom repository methods
+$featuredProducts = $repository->findFeaturedProducts(limit: 3);
+$midRangeProducts = $repository->findByPriceRange(minPrice: 20, maxPrice: 50);
+
+// Get API-formatted products
+$apiProducts = $repository->getProductsForApi();
+```
+
 ### Repository Pattern
 
 Use the repository pattern to interact with your entities:
@@ -193,20 +335,26 @@ class ProductController extends AbstractController
         $repository = $this->repositoryFactory->getRepository(Product::class);
         $products = $repository->findAll();
 
-        return $this->json($products);
+        // Convert all products to arrays for JSON response
+        $productsArray = array_map(fn($product) => $product->toArray(), $products);
+
+        return $this->json($productsArray);
     }
 
     #[Route('/products/{id}', name: 'product_show', methods: ['GET'])]
     public function show(string $id): Response
     {
         $repository = $this->repositoryFactory->getRepository(Product::class);
-        $product = $repository->find($id);
+        $product = $repository->find(id: $id);
 
         if (!$product) {
             throw $this->createNotFoundException('Product not found');
         }
 
-        return $this->json($product);
+        // Only include specific fields in the response
+        $productData = $product->extract(fields: ['name', 'price', 'description']);
+
+        return $this->json($productData);
     }
 
     #[Route('/products', name: 'product_create', methods: ['POST'])]
@@ -220,25 +368,25 @@ class ProductController extends AbstractController
         $product->price = 19.99;
         $product->stock = 100;
 
-        $product = $repository->create($product);
+        $product = $repository->create(entity: $product);
 
-        return $this->json($product, 201);
+        return $this->json($product->toArray(), 201);
     }
 
     #[Route('/products/{id}', name: 'product_update', methods: ['PUT'])]
     public function update(string $id): Response
     {
         $repository = $this->repositoryFactory->getRepository(Product::class);
-        $product = $repository->find($id);
+        $product = $repository->find(id: $id);
 
         if (!$product) {
             throw $this->createNotFoundException('Product not found');
         }
 
         $product->price = 29.99;
-        $product = $repository->update($product);
+        $product = $repository->update(entity: $product);
 
-        return $this->json($product);
+        return $this->json($product->toArray());
     }
 
     #[Route('/products/{id}', name: 'product_delete', methods: ['DELETE'])]
@@ -247,7 +395,7 @@ class ProductController extends AbstractController
         $repository = $this->repositoryFactory->getRepository(Product::class);
         
         // Will automatically delete related entities with CASCADE_REMOVE
-        $success = $repository->deleteById($id);
+        $success = $repository->deleteById(id: $id);
 
         return $this->json(['success' => $success]);
     }
@@ -263,13 +411,24 @@ $repository = $this->repositoryFactory->getRepository(Product::class);
 $queryBuilder = $repository->createQueryBuilder();
 
 $products = $queryBuilder
-    ->gt('price', 20)
-    ->lt('price', 100)
-    ->contains('description', 'awesome')
-    ->orderBy('price', 'DESC')
-    ->limit(10)
-    ->offset(0)
+    ->gt(field: 'price', value: 20)
+    ->lt(field: 'price', value: 100)
+    ->contains(field: 'description', value: 'awesome')
+    ->orderBy(field: 'price', direction: 'DESC')
+    ->limit(limit: 10)
+    ->offset(offset: 0)
     ->getResult();
+
+// Convert results to arrays with custom field mapping
+$productsArray = array_map(
+    fn($product) => $product->toArray(
+        mapping: [
+            'name' => 'productName',
+            'price' => 'cost'
+        ]
+    ),
+    $products
+);
 ```
 
 ### Join Queries
@@ -281,9 +440,28 @@ $repository = $this->repositoryFactory->getRepository(Post::class);
 $joinQueryBuilder = $repository->createJoinQueryBuilder();
 
 $posts = $joinQueryBuilder
-    ->innerJoin('comment', 'id', 'postId', 'comments')
-    ->gt('comments.createdAt', new \DateTime('-7 days'))
+    ->innerJoin(
+        entityType: 'comment',
+        localField: 'id',
+        foreignField: 'postId',
+        as: 'comments'
+    )
+    ->gt(field: 'comments.createdAt', value: new \DateTime('-7 days'))
     ->getJoinResult();
+
+// Prepare posts for API response with renamed fields
+$postsData = [];
+foreach ($posts as $post) {
+    $postData = $post->extract(fields: ['title', 'content', 'createdAt']);
+    
+    // Map comments to array with only necessary fields
+    $postData['comments'] = array_map(
+        fn($comment) => $comment->extract(fields: ['content']),
+        $post->comments
+    );
+    
+    $postsData[] = $postData;
+}
 ```
 
 ### Direct Service Usage
@@ -307,16 +485,37 @@ class ProductService
     public function getProductsByPriceRange(float $min, float $max): array
     {
         return $this->syncopateService->findBy(
-            Product::class,
-            [],
-            ['price' => 'ASC']
+            entityClass: Product::class,
+            criteria: [],
+            orderBy: ['price' => 'ASC']
         );
     }
     
     public function deleteProductWithRelations(string $id): bool
     {
         // Will automatically handle cascade delete based on relationship attributes
-        return $this->syncopateService->deleteById(Product::class, $id, true);
+        return $this->syncopateService->deleteById(
+            entityClass: Product::class, 
+            id: $id, 
+            enableCascade: true
+        );
+    }
+    
+    public function getProductsForApi(): array
+    {
+        $products = $this->getProductsByPriceRange(min: 10, max: 100);
+        
+        // Transform for API response using EntityTrait
+        return array_map(
+            fn($product) => $product->toArray(
+                mapping: [
+                    'id' => 'productId',
+                    'price' => 'unitPrice',
+                    'stock' => 'availableQuantity'
+                ]
+            ),
+            $products
+        );
     }
 }
 ```

@@ -13,6 +13,7 @@ class EntityRepository
     protected SyncopateService $syncopateService;
     protected EntityMapper $entityMapper;
     protected string $entityClass;
+    protected string $entityType;
 
     public function __construct(
         SyncopateService $syncopateService,
@@ -22,6 +23,14 @@ class EntityRepository
         $this->syncopateService = $syncopateService;
         $this->entityMapper = $entityMapper;
         $this->entityClass = $entityClass;
+
+        // Get entity type from entity class
+        $entityTypeRegistry = $this->getEntityTypeRegistry();
+        $this->entityType = $entityTypeRegistry->getEntityType($entityClass);
+
+        if ($this->entityType === null) {
+            throw new \InvalidArgumentException("Class $entityClass is not registered as an entity");
+        }
     }
 
     /**
@@ -158,5 +167,32 @@ class EntityRepository
     public function executeJoinQuery(JoinQueryOptions $joinQueryOptions): array
     {
         return $this->syncopateService->joinQuery($this->entityClass, $joinQueryOptions);
+    }
+
+    /**
+     * Get entity class for this repository
+     */
+    public function getEntityClass(): string
+    {
+        return $this->entityClass;
+    }
+
+    /**
+     * Get entity type for this repository
+     */
+    public function getEntityType(): string
+    {
+        return $this->entityType;
+    }
+
+    /**
+     * Helper method to get the EntityTypeRegistry from the SyncopateService
+     * @throws \ReflectionException
+     */
+    protected function getEntityTypeRegistry()
+    {
+        $reflection = new \ReflectionProperty($this->syncopateService, 'entityTypeRegistry');
+        $reflection->setAccessible(true);
+        return $reflection->getValue($this->syncopateService);
     }
 }
