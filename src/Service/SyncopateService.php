@@ -782,11 +782,23 @@ class SyncopateService
                         $reflection = new \ReflectionProperty($entity, $key);
                         $reflection->setAccessible(true);
 
-                        // Map the joined entity to the appropriate type
-                        // You'll need to implement or use a method to determine the target class
-                        $targetClass = $this->getTargetClassForProperty($className, $key);
+                        // Get the target entity class for this property
+                        $targetClass = $this->getRelationshipTargetClass($className, $key);
+
                         if ($targetClass) {
-                            $joinedEntity = $this->entityMapper->mapToObject($value, $targetClass);
+                            // Create an instance of the target class and map properties
+                            $joinedEntity = new $targetClass();
+
+                            // Map each field to the joined entity
+                            foreach ($value as $fieldName => $fieldValue) {
+                                if (property_exists($joinedEntity, $fieldName)) {
+                                    $fieldReflection = new \ReflectionProperty($joinedEntity, $fieldName);
+                                    $fieldReflection->setAccessible(true);
+                                    $fieldReflection->setValue($joinedEntity, $fieldValue);
+                                }
+                            }
+
+                            // Set the joined entity to the property
                             $reflection->setValue($entity, $joinedEntity);
                         }
                     }
@@ -799,8 +811,11 @@ class SyncopateService
         return $entities;
     }
 
-    // Helper method to determine the target class for a property
-    private function getTargetClassForProperty(string $className, string $propertyName): ?string
+
+    /**
+     * Get the target entity class for a relationship property
+     */
+    private function getRelationshipTargetClass(string $className, string $propertyName): ?string
     {
         try {
             $reflection = new \ReflectionClass($className);
@@ -809,15 +824,17 @@ class SyncopateService
             }
 
             $property = $reflection->getProperty($propertyName);
-            $relationshipAttributes = $property->getAttributes(\Phillarmonic\SyncopateBundle\Attribute\Relationship::class);
+            $relationshipAttributes = $property->getAttributes(Relationship::class);
 
             if (empty($relationshipAttributes)) {
                 return null;
             }
 
+            /** @var Relationship $relationshipAttribute */
             $relationshipAttribute = $relationshipAttributes[0]->newInstance();
             return $relationshipAttribute->targetEntity;
         } catch (\Throwable $e) {
+            // Log the error
             return null;
         }
     }
