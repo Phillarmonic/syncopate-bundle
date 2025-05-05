@@ -773,158 +773,136 @@ class SyncopateService
                     $isArrayProperty = ($type && $type->getName() === 'array');
 
                     if ($isArrayProperty && is_array($value)) {
-                        // For array properties, initialize if not already set
-                        if (!$reflection->isInitialized($entity)) {
-                            $reflection->setValue($entity, []);
+                        // Get a target class for this relationship
+                        $targetClass = $this->getRelationshipTargetClass($className, $key);
+
+                        // Skip if no target class found
+                        if (!$targetClass) {
+                            continue;
                         }
 
-                        // Get current array value
-                        $currentArray = $reflection->getValue($entity);
+                        // Initialize an empty collection
+                        $collection = [];
 
+                        // If the value is a collection (indexed array of items)
+                        if (array_key_exists(0, $value)) {
+                            // Process each item in the collection
+                            foreach ($value as $itemData) {
+                                $targetEntity = $this->createRelatedEntity($targetClass, $itemData);
+                                if ($targetEntity !== null) {
+                                    $collection[] = $targetEntity;
+                                }
+                            }
+                        }
+
+                        // Set the collection to the property
+                        $reflection->setValue($entity, $collection);
+                    } else if (!$isArrayProperty && !is_array($value)) {
+                        // For non-array properties, set the value directly
+                        $reflection->setValue($entity, $value);
+                    }
+                }
+            }
+
+            // Process joined data in fields array
+            if (isset($entityData['fields']) && is_array($entityData['fields'])) {
+                foreach ($entityData['fields'] as $key => $value) {
+                    // Skip if not a joined entity or collection
+                    if (!property_exists($entity, $key) || !is_array($value)) {
+                        continue;
+                    }
+
+                    $reflection = new \ReflectionProperty($entity, $key);
+                    $reflection->setAccessible(true);
+
+                    // Check if this is an array property (collection)
+                    $type = $reflection->getType();
+                    $isArrayProperty = ($type && $type->getName() === 'array');
+
+                    if ($isArrayProperty) {
                         // Get target class for this relationship
                         $targetClass = $this->getRelationshipTargetClass($className, $key);
 
-                        // If we have a target class, create objects for each item
-                        if ($targetClass) {
-                            foreach ($value as $item) {
-                                // Create a new instance of the target entity
-                                $targetEntity = new $targetClass();
+                        // Skip if no target class found
+                        if (!$targetClass) {
+                            continue;
+                        }
 
-                                // Get all properties of the target class
-                                $targetReflection = new \ReflectionClass($targetClass);
-                                $targetProperties = $targetReflection->getProperties();
+                        // Initialize an empty collection
+                        $collection = [];
 
-                                // Map data to properties
-                                foreach ($targetProperties as $prop) {
-                                    $propName = $prop->getName();
-                                    $fieldName = $this->getFieldNameFromProperty($prop);
-
-                                    // Try with direct property name
-                                    if (isset($item[$propName])) {
-                                        $prop->setAccessible(true);
-                                        $prop->setValue($targetEntity, $item[$propName]);
-                                    }
-                                    // Try with field name from attribute
-                                    elseif ($fieldName && isset($item[$fieldName])) {
-                                        $prop->setAccessible(true);
-                                        $prop->setValue($targetEntity, $item[$fieldName]);
-                                    }
-                                    // Try with snake_case version
-                                    else {
-                                        $snakeName = $this->camelToSnake($propName);
-                                        if (isset($item[$snakeName])) {
-                                            $prop->setAccessible(true);
-                                            $prop->setValue($targetEntity, $item[$snakeName]);
-                                        }
-                                    }
+                        // If the value is a collection (indexed array of items)
+                        if (array_key_exists(0, $value)) {
+                            // Process each item in the collection
+                            foreach ($value as $itemData) {
+                                $targetEntity = $this->createRelatedEntity($targetClass, $itemData);
+                                if ($targetEntity !== null) {
+                                    $collection[] = $targetEntity;
                                 }
-
-                                $currentArray[] = $targetEntity;
-                            }
-                        } else {
-                            // If no target class, just add the raw data
-                            foreach ($value as $item) {
-                                $currentArray[] = $item;
                             }
                         }
 
-                        // Set the updated array back to the property
-                        $reflection->setValue($entity, $currentArray);
+                        // Set the collection to the property
+                        $reflection->setValue($entity, $collection);
                     } else {
-                        // For non-array properties, set the value directly
-                        if (!$reflection->isInitialized($entity)) {
-                            $reflection->setValue($entity, $value);
-                        }
-                    }
-                }
-            }
-
-            // Also check inside 'fields' for nested joined data
-            if (isset($entityData['fields']) && is_array($entityData['fields'])) {
-                foreach ($entityData['fields'] as $key => $value) {
-                    // If this looks like a joined entity (is an array and not a scalar value)
-                    if (is_array($value) && !empty($value) && property_exists($entity, $key)) {
-                        $reflection = new \ReflectionProperty($entity, $key);
-                        $reflection->setAccessible(true);
-
-                        // Get the target entity class for this property
+                        // For single entity relationships
                         $targetClass = $this->getRelationshipTargetClass($className, $key);
 
                         if ($targetClass) {
-                            // Check if this is an array property (one-to-many relationship)
-                            $type = $reflection->getType();
-                            $isArrayProperty = ($type && $type->getName() === 'array');
-
-                            if ($isArrayProperty) {
-                                // For array properties, initialize if not already set
-                                if (!$reflection->isInitialized($entity)) {
-                                    $reflection->setValue($entity, []);
-                                }
-
-                                // Get current array value
-                                $currentArray = $reflection->getValue($entity) ?: [];
-
-                                // Create a new instance for each item and add to array
-                                $joinedEntity = new $targetClass();
-
-                                // Map each field to the joined entity, with proper name conversion
-                                foreach ($value as $fieldName => $fieldValue) {
-                                    // Try direct property matching
-                                    if (property_exists($joinedEntity, $fieldName)) {
-                                        $fieldReflection = new \ReflectionProperty($joinedEntity, $fieldName);
-                                        $fieldReflection->setAccessible(true);
-                                        $fieldReflection->setValue($joinedEntity, $fieldValue);
-                                    } else {
-                                        // Try snake_case to camelCase conversion
-                                        $camelFieldName = $this->snakeToCamel($fieldName);
-                                        if (property_exists($joinedEntity, $camelFieldName)) {
-                                            $fieldReflection = new \ReflectionProperty($joinedEntity, $camelFieldName);
-                                            $fieldReflection->setAccessible(true);
-                                            $fieldReflection->setValue($joinedEntity, $fieldValue);
-                                        }
-                                    }
-                                }
-
-                                // Add the new entity to the array
-                                $currentArray[] = $joinedEntity;
-
-                                // Set the updated array back to the property
-                                $reflection->setValue($entity, $currentArray);
-                            } else {
-                                // Create an instance of the target class and map properties
-                                $joinedEntity = new $targetClass();
-
-                                // Map each field to the joined entity
-                                foreach ($value as $fieldName => $fieldValue) {
-                                    // Try direct property matching
-                                    if (property_exists($joinedEntity, $fieldName)) {
-                                        $fieldReflection = new \ReflectionProperty($joinedEntity, $fieldName);
-                                        $fieldReflection->setAccessible(true);
-                                        $fieldReflection->setValue($joinedEntity, $fieldValue);
-                                    } else {
-                                        // Try snake_case to camelCase conversion
-                                        $camelFieldName = $this->snakeToCamel($fieldName);
-                                        if (property_exists($joinedEntity, $camelFieldName)) {
-                                            $fieldReflection = new \ReflectionProperty($joinedEntity, $camelFieldName);
-                                            $fieldReflection->setAccessible(true);
-                                            $fieldReflection->setValue($joinedEntity, $fieldValue);
-                                        }
-                                    }
-                                }
-
-                                // Set the joined entity to the property
-                                $reflection->setValue($entity, $joinedEntity);
+                            $targetEntity = $this->createRelatedEntity($targetClass, $value);
+                            if ($targetEntity !== null) {
+                                $reflection->setValue($entity, $targetEntity);
                             }
                         }
                     }
                 }
             }
+
             $entities[] = $entity;
         }
 
         return $entities;
     }
 
+    /**
+     * Create a related entity object from data
+     */
+    private function createRelatedEntity(string $className, array $data): ?object
+    {
+        try {
+            $entity = new $className();
+            $reflection = new \ReflectionClass($className);
+
+            // Map data to entity properties
+            foreach ($reflection->getProperties() as $property) {
+                $property->setAccessible(true);
+                $propertyName = $property->getName();
+
+                // Try different naming conventions
+                if (array_key_exists($propertyName, $data)) {
+                    // Direct match
+                    $property->setValue($entity, $data[$propertyName]);
+                } else {
+                    // Try field name from attribute
+                    $fieldName = $this->getFieldNameFromProperty($property);
+                    if ($fieldName && array_key_exists($fieldName, $data)) {
+                        $property->setValue($entity, $data[$fieldName]);
+                    } else {
+                        // Try snake_case version
+                        $snakeName = $this->camelToSnake($propertyName);
+                        if (array_key_exists($snakeName, $data)) {
+                            $property->setValue($entity, $data[$snakeName]);
+                        }
+                    }
+                }
+            }
+
+            return $entity;
+        } catch (\Throwable $e) {
+            // Log error if needed
+            return null;
+        }
+    }
 
     /**
      * Get the target entity class for a relationship property
