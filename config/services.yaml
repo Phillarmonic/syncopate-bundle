@@ -83,7 +83,27 @@ services:
         arguments:
             $syncopateService: '@Phillarmonic\SyncopateBundle\Service\SyncopateService'
             $entityMapper: '@Phillarmonic\SyncopateBundle\Mapper\EntityMapper'
+            $repositoryRegistry: '@Phillarmonic\SyncopateBundle\Service\RepositoryRegistry'
+            $container: '@service_container'  # Explicit reference to service_container
         public: true
+
+    Symfony\Component\DependencyInjection\ContainerInterface: '@service_container'
+
+    Phillarmonic\SyncopateBundle\Service\RepositoryRegistry:
+        autowire: trueƒ
+        autoconfigure: true
+
+    Phillarmonic\SyncopateBundle\Repository\EntityRepository:
+            autowire: true
+            autoconfigure: true
+            public: false
+            abstract: true
+
+    # This catches all custom repositories
+    _instanceof:
+        Phillarmonic\SyncopateBundle\Repository\EntityRepository:
+            autowire: true
+            tags: [ 'syncopate.repository' ]
 
     Phillarmonic\SyncopateBundle\Command\RegisterEntityTypesCommand:
         tags:
