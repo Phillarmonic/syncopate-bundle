@@ -6,6 +6,7 @@ use Phillarmonic\SyncopateBundle\Exception\SyncopateApiException;
 use Phillarmonic\SyncopateBundle\Util\DebugHelper;
 use Symfony\Component\HttpClient\Exception\ClientException;
 use Symfony\Component\HttpClient\Exception\ServerException;
+use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 
@@ -298,35 +299,37 @@ class SyncopateClient
     {
         $url = $this->baseUrl . $endpoint;
         $requestOptions = array_merge($this->defaultOptions, $options);
+        $requestOptions['buffer'] = false;
 
-        // Add memory-related options
-        $requestOptions['buffer'] = false; // Don't buffer entire response
+        // Validate/sanitize JSON payload
+        if (isset($requestOptions['json']) && is_array($requestOptions['json'])) {
+            try {
+                json_encode($requestOptions['json'], JSON_THROW_ON_ERROR);
+            } catch (\JsonException $e) {
+                $requestOptions['json'] = DebugHelper::sanitizeForJson($requestOptions['json']);
+            }
+        }
 
         try {
-            // First attempt to fix any potential JSON encoding issues
-            if (isset($requestOptions['json']) && is_array($requestOptions['json'])) {
-                try {
-                    // Pre-encode to check for errors
-                    json_encode($requestOptions['json'], JSON_THROW_ON_ERROR);
-                } catch (\JsonException $e) {
-                    // If JSON encoding fails, try to sanitize the data
-                    $requestOptions['json'] = DebugHelper::sanitizeForJson($requestOptions['json']);
-                }
-            }
-
             $response = $this->httpClient->request($method, $url, $requestOptions);
             return $this->processStreamedResponse($response);
-        } catch (ClientException|ServerException $e) {
-            // Try to extract an error message from response
+        } catch (ClientException | ServerException $e) {
+            // These are the specific HTTP exceptions that are actually thrown
             $response = $e->getResponse();
-            $statusCode = $response->getStatusCode();
-            $error = $this->parseErrorResponse($response);
+            $statusCode = $response instanceof ResponseInterface ? $response->getStatusCode() : 0;
+            $error = $response instanceof ResponseInterface ? $this->parseErrorResponse($response) : [];
 
             throw new SyncopateApiException(
                 $error['message'] ?? $e->getMessage(),
                 $statusCode,
                 $e,
                 $error
+            );
+        } catch (TransportExceptionInterface $e) {
+            throw new SyncopateApiException(
+                'Network error communicating with SyncopateDB API: ' . $e->getMessage(),
+                0,
+                $e
             );
         } catch (\JsonException $e) {
             throw new SyncopateApiException(
@@ -336,7 +339,7 @@ class SyncopateClient
             );
         } catch (\Throwable $e) {
             throw new SyncopateApiException(
-                'Failed to communicate with SyncopateDB API: ' . $e->getMessage(),
+                'Unexpected error communicating with SyncopateDB API: ' . $e->getMessage(),
                 0,
                 $e
             );
