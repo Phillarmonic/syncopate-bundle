@@ -9,7 +9,7 @@ trait EntityTrait
      *
      * @param array|null $fields Only include these fields if specified
      * @param array $exclude Fields to exclude
-     * @param array $mapping Map original property names to custom keys in result
+     * @param array $mapping Map property names to custom keys in result (['newKey' => 'originalProperty'])
      * @return array
      */
     public function toArray(?array $fields = null, array $exclude = [], array $mapping = []): array
@@ -18,13 +18,13 @@ trait EntityTrait
         $reflection = new \ReflectionClass($this);
 
         // Always include ID if it exists
-        if ($reflection->hasProperty('id')) {
+        if ($reflection->hasProperty('id') && !in_array('id', $exclude)) {
             $idProperty = $reflection->getProperty('id');
             $idProperty->setAccessible(true);
             $idValue = $idProperty->getValue($this);
 
-            // Check if ID is in the mapping
-            $idKey = array_search('id', $mapping) ?: 'id';
+            // Use mapped name if available
+            $idKey = isset($mapping['id']) ? $mapping['id'] : 'id';
             $result[$idKey] = $idValue;
         }
 
@@ -52,8 +52,8 @@ trait EntityTrait
             $fieldAttribute = $fieldAttributes[0]->newInstance();
             $fieldName = $fieldAttribute->name ?? $propertyName;
 
-            // Apply mapping if exists
-            $resultKey = array_search($propertyName, $mapping) ?: $fieldName;
+            // Use mapped name if available
+            $resultKey = isset($mapping[$propertyName]) ? $mapping[$propertyName] : $fieldName;
 
             // Get property value
             $property->setAccessible(true);
@@ -76,7 +76,7 @@ trait EntityTrait
      * Extract only specified fields to an array
      *
      * @param array $fields Fields to include
-     * @param array $mapping Map original property names to custom keys in result
+     * @param array $mapping Map property names to custom keys in result
      * @return array
      */
     public function extract(array $fields, array $mapping = []): array
@@ -88,24 +88,11 @@ trait EntityTrait
      * Extract all fields except specified ones
      *
      * @param array $exclude Fields to exclude
-     * @param array $mapping Map original property names to custom keys in result
+     * @param array $mapping Map property names to custom keys in result
      * @return array
      */
     public function extractExcept(array $exclude, array $mapping = []): array
     {
         return $this->toArray(null, $exclude, $mapping);
-    }
-
-    /**
-     * Extract fields with custom field name mapping
-     *
-     * @param array $mapping Map of 'resultKey' => 'propertyName'
-     * @return array
-     */
-    public function extractAs(array $mapping): array
-    {
-        // For extractAs, we only want to include the fields in the mapping
-        $fields = array_values($mapping);
-        return $this->toArray($fields, [], array_flip($mapping));
     }
 }
