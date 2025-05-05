@@ -422,4 +422,52 @@ class SyncopateClient
             ];
         }
     }
+
+    /**
+     * Generate a cURL command from request parameters
+     * This is for investigation when breakpoint debugging
+     */
+    private function generateCurlCommand(string $method, string $url, array $options): string
+    {
+        $curlCommand = 'curl -X ' . $method . ' "' . $url . '"';
+
+        // Add headers
+        if (isset($options['headers']) && is_array($options['headers'])) {
+            foreach ($options['headers'] as $name => $value) {
+                $curlCommand .= ' -H "' . $name . ': ' . $value . '"';
+            }
+        }
+
+        // Add JSON body if present
+        if (isset($options['json'])) {
+            $jsonData = json_encode($options['json'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $curlCommand .= ' -H "Content-Type: application/json"';
+            $curlCommand .= ' -d \'' . $jsonData . '\'';
+        }
+
+        // Add form data if present
+        if (isset($options['body'])) {
+            $curlCommand .= ' -d \'' . $options['body'] . '\'';
+        }
+
+        // Add query parameters if present
+        if (isset($options['query']) && is_array($options['query'])) {
+            // Check if URL already has query parameters
+            $separator = strpos($url, '?') !== false ? '&' : '?';
+            $queryString = http_build_query($options['query']);
+            if (!empty($queryString)) {
+                $curlCommand .= ' "' . $separator . $queryString . '"';
+            }
+        }
+
+        // Add other common curl options
+        $curlCommand .= ' --location'; // follow redirects
+
+        // Add timeout if specified
+        if (isset($options['timeout'])) {
+            $curlCommand .= ' --max-time ' . $options['timeout'];
+        }
+
+        return $curlCommand;
+    }
 }
