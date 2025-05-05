@@ -756,10 +756,10 @@ class SyncopateService
         foreach ($response['data'] as $entityData) {
             $entity = $this->entityMapper->mapToObject($entityData, $className);
 
-            // Process joined data
+            // Process joined data at root level
             foreach ($entityData as $key => $value) {
                 // Skip standard entity fields
-                if (in_array($key, ['id', 'fields'])) {
+                if (in_array($key, ['id', 'fields', 'type'])) {
                     continue;
                 }
 
@@ -774,9 +774,51 @@ class SyncopateService
                 }
             }
 
+            // Also check inside 'fields' for nested joined data
+            if (isset($entityData['fields']) && is_array($entityData['fields'])) {
+                foreach ($entityData['fields'] as $key => $value) {
+                    // If this looks like a joined entity (is an array and not a scalar value)
+                    if (is_array($value) && !empty($value) && property_exists($entity, $key)) {
+                        $reflection = new \ReflectionProperty($entity, $key);
+                        $reflection->setAccessible(true);
+
+                        // Map the joined entity to the appropriate type
+                        // You'll need to implement or use a method to determine the target class
+                        $targetClass = $this->getTargetClassForProperty($className, $key);
+                        if ($targetClass) {
+                            $joinedEntity = $this->entityMapper->mapToObject($value, $targetClass);
+                            $reflection->setValue($entity, $joinedEntity);
+                        }
+                    }
+                }
+            }
+
             $entities[] = $entity;
         }
 
         return $entities;
+    }
+
+    // Helper method to determine the target class for a property
+    private function getTargetClassForProperty(string $className, string $propertyName): ?string
+    {
+        try {
+            $reflection = new \ReflectionClass($className);
+            if (!$reflection->hasProperty($propertyName)) {
+                return null;
+            }
+
+            $property = $reflection->getProperty($propertyName);
+            $relationshipAttributes = $property->getAttributes(\Phillarmonic\SyncopateBundle\Attribute\Relationship::class);
+
+            if (empty($relationshipAttributes)) {
+                return null;
+            }
+
+            $relationshipAttribute = $relationshipAttributes[0]->newInstance();
+            return $relationshipAttribute->targetEntity;
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 }
