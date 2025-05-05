@@ -83,7 +83,11 @@ services:
         arguments:
             $syncopateService: '@Phillarmonic\SyncopateBundle\Service\SyncopateService'
             $entityMapper: '@Phillarmonic\SyncopateBundle\Mapper\EntityMapper'
+            $repositoryRegistry: '@Phillarmonic\SyncopateBundle\Service\RepositoryRegistry'
+            $container: '@service_container'  # Explicit reference to service_container
         public: true
+
+    Symfony\Component\DependencyInjection\ContainerInterface: '@service_container'
 
     Phillarmonic\SyncopateBundle\Service\RepositoryRegistry:
         autowire: trueƒ
