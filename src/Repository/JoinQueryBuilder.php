@@ -206,7 +206,7 @@ class JoinQueryBuilder extends QueryBuilder
     }
 
     // Helper methods to access parent private properties
-    protected function getEntityType(): string
+    public function getEntityType(): string
     {
         $reflection = new \ReflectionProperty($this, 'entityType');
         $reflection->setAccessible(true);
