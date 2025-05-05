@@ -2,6 +2,7 @@
 
 namespace Phillarmonic\SyncopateBundle;
 
+use Phillarmonic\SyncopateBundle\DependencyInjection\Compiler\RegisterRepositoriesPass;
 use Phillarmonic\SyncopateBundle\DependencyInjection\PhillarmonicSyncopateExtension;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\ExtensionInterface;
@@ -13,8 +14,8 @@ class PhillarmonicSyncopateBundle extends Bundle
     {
         parent::build($container);
 
-        // You can add compiler passes here if needed
-        // $container->addCompilerPass(new YourCompilerPass());
+        // Register compiler passes
+        $container->addCompilerPass(new RegisterRepositoriesPass());
     }
 
     public function getContainerExtension(): ?ExtensionInterface
