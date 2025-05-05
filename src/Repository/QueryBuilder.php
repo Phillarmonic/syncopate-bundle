@@ -271,6 +271,7 @@ class QueryBuilder
         $queryOptions->setLimit(0);
 
         $results = $this->syncopateService->query($this->entityClass, $queryOptions);
+        // Todo(PhillarMonkey): check the parsing here
         return $results['total'] ?? 0;
     }
 }
