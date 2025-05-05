@@ -768,8 +768,31 @@ class SyncopateService
                     $reflection = new \ReflectionProperty($entity, $key);
                     $reflection->setAccessible(true);
 
-                    if (!$reflection->isInitialized($entity)) {
-                        $reflection->setValue($entity, $value);
+                    // Check if this is an array property (collection)
+                    $type = $reflection->getType();
+                    $isArrayProperty = ($type && $type->getName() === 'array');
+
+                    if ($isArrayProperty && is_array($value)) {
+                        // For array properties, initialize if not already set
+                        if (!$reflection->isInitialized($entity)) {
+                            $reflection->setValue($entity, []);
+                        }
+
+                        // Get current array value
+                        $currentArray = $reflection->getValue($entity);
+
+                        // For each item in the collection, add it to the array
+                        foreach ($value as $item) {
+                            $currentArray[] = $item;
+                        }
+
+                        // Set the updated array back to the property
+                        $reflection->setValue($entity, $currentArray);
+                    } else {
+                        // For non-array properties, set the value directly
+                        if (!$reflection->isInitialized($entity)) {
+                            $reflection->setValue($entity, $value);
+                        }
                     }
                 }
             }
