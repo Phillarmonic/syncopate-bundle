@@ -99,7 +99,6 @@ services:
     _instanceof:
         Phillarmonic\SyncopateBundle\Repository\EntityRepository:
             autowire: true
-            autoconfigure: true
             tags: [ 'syncopate.repository' ]
 
     Phillarmonic\SyncopateBundle\Command\RegisterEntityTypesCommand:
