@@ -85,6 +85,23 @@ services:
             $entityMapper: '@Phillarmonic\SyncopateBundle\Mapper\EntityMapper'
         public: true
 
+    Phillarmonic\SyncopateBundle\Service\RepositoryRegistry:
+        autowire: trueƒ
+        autoconfigure: true
+
+    Phillarmonic\SyncopateBundle\Repository\EntityRepository:
+            autowire: true
+            autoconfigure: true
+            public: false
+            abstract: true
+
+    # This catches all custom repositories
+    _instanceof:
+        Phillarmonic\SyncopateBundle\Repository\EntityRepository:
+            autowire: true
+            autoconfigure: true
+            tags: [ 'syncopate.repository' ]
+
     Phillarmonic\SyncopateBundle\Command\RegisterEntityTypesCommand:
         tags:
             - { name: console.command }

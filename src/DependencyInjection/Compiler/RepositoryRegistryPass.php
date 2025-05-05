@@ -3,25 +3,26 @@
 namespace Phillarmonic\SyncopateBundle\DependencyInjection\Compiler;
 
 use Phillarmonic\SyncopateBundle\Attribute\Entity;
-use Phillarmonic\SyncopateBundle\Repository\EntityRepository;
+use Phillarmonic\SyncopateBundle\Service\RepositoryRegistry;
+use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
-use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
-use Symfony\Component\Finder\Finder;
-use Phillarmonic\SyncopateBundle\Service\SyncopateService;
-use Phillarmonic\SyncopateBundle\Mapper\EntityMapper;
 
 /**
- * Compiler pass to automatically register repository services for entities
+ * Build the repository registry with mappings between entities and repositories
  */
-class RegisterRepositoriesPass implements CompilerPassInterface
+class RepositoryRegistryPass implements CompilerPassInterface
 {
-    /**
-     * Process the container to find and register entity repositories
-     */
-    public function process(ContainerBuilder $container): void
+    public function process(ContainerBuilder $container)
     {
+        // Create the repository registry service if it doesn't exist
+        if (!$container->hasDefinition(RepositoryRegistry::class)) {
+            $registryDef = new Definition(RepositoryRegistry::class);
+            $registryDef->setAutowired(true);
+            $container->setDefinition(RepositoryRegistry::class, $registryDef);
+        }
+
         // Get entity paths from bundle configuration
         $entityPaths = $container->getParameter('phillarmonic_syncopate.entity_paths');
 
@@ -29,19 +30,47 @@ class RegisterRepositoriesPass implements CompilerPassInterface
             return;
         }
 
+        // Map of entity classes to repository classes
+        $entityRepoMap = [];
+
         // Find all entity classes with repository classes
         $entityClasses = $this->findEntityClasses($entityPaths);
 
         foreach ($entityClasses as $entityClass) {
             $repositoryClass = $this->getRepositoryClass($entityClass);
 
-            if ($repositoryClass &&
-                !$container->hasDefinition($repositoryClass) &&
-                class_exists($repositoryClass) &&
-                is_subclass_of($repositoryClass, EntityRepository::class)) {
+            if ($repositoryClass) {
+                $entityRepoMap[$entityClass] = $repositoryClass;
 
-                // Register the repository as a service
-                $this->registerRepository($container, $entityClass, $repositoryClass);
+                // Ensure the repository service has correct $entityClass
+                if ($container->hasDefinition($repositoryClass)) {
+                    $container->getDefinition($repositoryClass)
+                        ->setArgument('$entityClass', $entityClass);
+                }
+            }
+        }
+
+        // Configure services for the found repositories
+        foreach ($entityRepoMap as $entityClass => $repositoryClass) {
+            // Add to the repository registry
+            $container->getDefinition(RepositoryRegistry::class)
+                ->addMethodCall('registerMapping', [$entityClass, $repositoryClass]);
+
+            // Create the repository definition if it doesn't exist
+            if (!$container->hasDefinition($repositoryClass) && class_exists($repositoryClass)) {
+                $definition = new Definition($repositoryClass);
+                $definition->setAutowired(true);
+                $definition->setAutoconfigured(true);
+                $definition->setArgument('$entityClass', $entityClass);
+                $definition->addTag('syncopate.repository', ['entity_class' => $entityClass]);
+
+                $container->setDefinition($repositoryClass, $definition);
+
+                // Add alias for autowiring
+                if (!$container->hasAlias($repositoryClass)) {
+                    $container->setAlias($repositoryClass, $repositoryClass)
+                        ->setPublic(true);
+                }
             }
         }
     }
@@ -51,6 +80,8 @@ class RegisterRepositoriesPass implements CompilerPassInterface
      */
     private function findEntityClasses(array $paths): array
     {
+        // Implementation the same as in RegisterRepositoriesPass
+        // ... (code omitted for brevity) ...
         $entityClasses = [];
 
         foreach ($paths as $path) {
@@ -59,7 +90,7 @@ class RegisterRepositoriesPass implements CompilerPassInterface
             }
 
             try {
-                $finder = new Finder();
+                $finder = new \Symfony\Component\Finder\Finder();
                 $finder->files()->in($path)->name('*.php');
 
                 foreach ($finder as $file) {
@@ -95,6 +126,8 @@ class RegisterRepositoriesPass implements CompilerPassInterface
      */
     private function getClassNameFromFile(string $filePath, string $basePath): ?string
     {
+        // Implementation the same as in RegisterRepositoriesPass
+        // ... (code omitted for brevity) ...
         // Read the file content
         $content = file_get_contents($filePath);
         if ($content === false) {
@@ -139,33 +172,5 @@ class RegisterRepositoriesPass implements CompilerPassInterface
         } catch (\ReflectionException $e) {
             return null;
         }
-    }
-
-     /**
-     * Register repository as a service in the container
-     */
-    private function registerRepository(ContainerBuilder $container, string $entityClass, string $repositoryClass): void
-    {
-        // Create the repository definition
-        $definition = new Definition($repositoryClass);
-
-        // Set autowiring and autoconfiguration
-        $definition->setAutowired(true);
-        $definition->setAutoconfigured(true);
-
-        // Set constructor arguments - explicitly bind the entityClass parameter
-        $definition->setArgument('$syncopateService', new Reference(SyncopateService::class));
-        $definition->setArgument('$entityMapper', new Reference(EntityMapper::class));
-        $definition->setArgument('$entityClass', $entityClass);
-
-        // Tag as repository for potential future use
-        $definition->addTag('syncopate.repository', ['entity_class' => $entityClass]);
-
-        // Register the service
-        $container->setDefinition($repositoryClass, $definition);
-
-        // Add repository alias for autowiring by repository class
-        $container->setAlias($repositoryClass, $repositoryClass)
-            ->setPublic(true);
     }
 }
