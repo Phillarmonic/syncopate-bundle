@@ -781,9 +781,51 @@ class SyncopateService
                         // Get current array value
                         $currentArray = $reflection->getValue($entity);
 
-                        // For each item in the collection, add it to the array
-                        foreach ($value as $item) {
-                            $currentArray[] = $item;
+                        // Get target class for this relationship
+                        $targetClass = $this->getRelationshipTargetClass($className, $key);
+
+                        // If we have a target class, create objects for each item
+                        if ($targetClass) {
+                            foreach ($value as $item) {
+                                // Create a new instance of the target entity
+                                $targetEntity = new $targetClass();
+
+                                // Get all properties of the target class
+                                $targetReflection = new \ReflectionClass($targetClass);
+                                $targetProperties = $targetReflection->getProperties();
+
+                                // Map data to properties
+                                foreach ($targetProperties as $prop) {
+                                    $propName = $prop->getName();
+                                    $fieldName = $this->getFieldNameFromProperty($prop);
+
+                                    // Try with direct property name
+                                    if (isset($item[$propName])) {
+                                        $prop->setAccessible(true);
+                                        $prop->setValue($targetEntity, $item[$propName]);
+                                    }
+                                    // Try with field name from attribute
+                                    elseif ($fieldName && isset($item[$fieldName])) {
+                                        $prop->setAccessible(true);
+                                        $prop->setValue($targetEntity, $item[$fieldName]);
+                                    }
+                                    // Try with snake_case version
+                                    else {
+                                        $snakeName = $this->camelToSnake($propName);
+                                        if (isset($item[$snakeName])) {
+                                            $prop->setAccessible(true);
+                                            $prop->setValue($targetEntity, $item[$snakeName]);
+                                        }
+                                    }
+                                }
+
+                                $currentArray[] = $targetEntity;
+                            }
+                        } else {
+                            // If no target class, just add the raw data
+                            foreach ($value as $item) {
+                                $currentArray[] = $item;
+                            }
                         }
 
                         // Set the updated array back to the property
@@ -824,11 +866,22 @@ class SyncopateService
 
                                 // Create a new instance for each item and add to array
                                 $joinedEntity = new $targetClass();
+
+                                // Map each field to the joined entity, with proper name conversion
                                 foreach ($value as $fieldName => $fieldValue) {
+                                    // Try direct property matching
                                     if (property_exists($joinedEntity, $fieldName)) {
                                         $fieldReflection = new \ReflectionProperty($joinedEntity, $fieldName);
                                         $fieldReflection->setAccessible(true);
                                         $fieldReflection->setValue($joinedEntity, $fieldValue);
+                                    } else {
+                                        // Try snake_case to camelCase conversion
+                                        $camelFieldName = $this->snakeToCamel($fieldName);
+                                        if (property_exists($joinedEntity, $camelFieldName)) {
+                                            $fieldReflection = new \ReflectionProperty($joinedEntity, $camelFieldName);
+                                            $fieldReflection->setAccessible(true);
+                                            $fieldReflection->setValue($joinedEntity, $fieldValue);
+                                        }
                                     }
                                 }
 
@@ -843,10 +896,19 @@ class SyncopateService
 
                                 // Map each field to the joined entity
                                 foreach ($value as $fieldName => $fieldValue) {
+                                    // Try direct property matching
                                     if (property_exists($joinedEntity, $fieldName)) {
                                         $fieldReflection = new \ReflectionProperty($joinedEntity, $fieldName);
                                         $fieldReflection->setAccessible(true);
                                         $fieldReflection->setValue($joinedEntity, $fieldValue);
+                                    } else {
+                                        // Try snake_case to camelCase conversion
+                                        $camelFieldName = $this->snakeToCamel($fieldName);
+                                        if (property_exists($joinedEntity, $camelFieldName)) {
+                                            $fieldReflection = new \ReflectionProperty($joinedEntity, $camelFieldName);
+                                            $fieldReflection->setAccessible(true);
+                                            $fieldReflection->setValue($joinedEntity, $fieldValue);
+                                        }
                                     }
                                 }
 
@@ -889,5 +951,35 @@ class SyncopateService
             // Log the error
             return null;
         }
+    }
+
+    /**
+     * Helper method to convert snake_case to camelCase
+     */
+    private function snakeToCamel(string $input): string
+    {
+        return lcfirst(str_replace('_', '', ucwords($input, '_')));
+    }
+
+    /**
+     * Helper method to convert camelCase to snake_case
+     */
+    private function camelToSnake(string $input): string
+    {
+        return strtolower(preg_replace('/(?<!^)[A-Z]/', '_$0', $input));
+    }
+
+    /**
+     * Get field name from property using Field attribute
+     */
+    private function getFieldNameFromProperty(\ReflectionProperty $property): ?string
+    {
+        $attributes = $property->getAttributes(\Phillarmonic\SyncopateBundle\Attribute\Field::class);
+        if (empty($attributes)) {
+            return null;
+        }
+
+        $fieldAttr = $attributes[0]->newInstance();
+        return $fieldAttr->name;
     }
 }
