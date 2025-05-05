@@ -95,4 +95,17 @@ trait EntityTrait
     {
         return $this->toArray(null, $exclude, $mapping);
     }
+
+    /**
+     * Extract entity fields with renamed keys
+     *
+     * @param array $mapping Map of 'originalProperty' => 'newKey'
+     * @param array $exclude Fields to exclude
+     * @return array
+     */
+    public function toArrayWithRenamedKeys(array $mapping = [], array $exclude = []): array
+    {
+        return $this->toArray(null, $exclude, $mapping);
+    }
+
 }
