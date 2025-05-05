@@ -8,15 +8,15 @@ use Phillarmonic\SyncopateBundle\Service\SyncopateService;
 
 class QueryBuilder
 {
-    private SyncopateService $syncopateService;
-    private string $entityClass;
+    protected SyncopateService $syncopateService;
+    protected string $entityClass;
     protected string $entityType;
-    private array $filters = [];
-    private ?string $orderBy = null;
-    private bool $orderDesc = false;
-    private ?int $limit = null;
-    private int $offset = 0;
-    private ?array $fuzzyOptions = null;
+    protected array $filters = [];
+    protected ?string $orderBy = null;
+    protected bool $orderDesc = false;
+    protected ?int $limit = null;
+    protected int $offset = 0;
+    protected ?array $fuzzyOptions = null;
 
     public function __construct(
         SyncopateService $syncopateService,
