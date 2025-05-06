@@ -71,10 +71,23 @@ class EntityRepository
 
     /**
      * Count entities matching criteria
+     * @throws \ReflectionException
      */
     public function count(array $criteria = []): int
     {
-        return $this->syncopateService->count($this->entityClass, $criteria);
+        // Get an entity type from registry
+        $entityTypeRegistry = $this->getEntityTypeRegistry();
+        $entityType = $entityTypeRegistry->getEntityType($this->entityClass);
+
+        // Create a QueryOptions object
+        $queryOptions = new QueryOptions($entityType);
+
+        // Add filters for criteria
+        foreach ($criteria as $field => $value) {
+            $queryOptions->addFilter(QueryFilter::eq($field, $value));
+        }
+
+        return $this->syncopateService->count($this->entityClass, $queryOptions);
     }
 
     /**
