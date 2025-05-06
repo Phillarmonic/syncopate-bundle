@@ -637,28 +637,24 @@ class SyncopateService
     /**
      * Count entities matching criteria
      */
-    public function count(string $className, array $criteria = []): int
+    public function count(string $className, QueryOptions $queryOptions): int
     {
-        // Get entity type from entity class
+        // Get an entity type from entity class
         $entityType = $this->entityTypeRegistry->getEntityType($className);
 
         if ($entityType === null) {
             throw new \InvalidArgumentException("Class $className is not registered as an entity");
         }
 
-        // Build query options with limit 0 to just get count
-        $queryOptions = new QueryOptions($entityType);
-        $queryOptions->setLimit(0);
-
-        // Add filters for criteria
-        foreach ($criteria as $field => $value) {
-            $queryOptions->addFilter(QueryFilter::eq($field, $value));
+        // Make sure the query is for the correct entity type
+        if ($queryOptions->getEntityType() !== $entityType) {
+            throw new \InvalidArgumentException("Query entity type does not match class entity type");
         }
 
-        // Execute query
-        $response = $this->client->query($queryOptions->toArray());
+        // Execute count query
+        $response = $this->client->queryCount($queryOptions->toArray());
 
-        return $response['total'] ?? 0;
+        return $response['count'] ?? 0;
     }
 
     /**
@@ -960,4 +956,6 @@ class SyncopateService
         $fieldAttr = $attributes[0]->newInstance();
         return $fieldAttr->name;
     }
+
+
 }

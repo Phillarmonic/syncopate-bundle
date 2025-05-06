@@ -262,6 +262,16 @@ class ProductRepository extends EntityRepository
             );
         }, $products);
     }
+    
+    /**
+     * Count products by category using optimized count API
+     */
+    public function countByCategory(string $category): int
+    {
+        return $this->createQueryBuilder()
+            ->eq(field: 'category', value: $category)
+            ->count();
+    }
 }
 ```
 
@@ -303,6 +313,9 @@ $midRangeProducts = $repository->findByPriceRange(minPrice: 20, maxPrice: 50);
 
 // Get API-formatted products
 $apiProducts = $repository->getProductsForApi();
+
+// Get count of products in a category
+$electronicsCount = $repository->countByCategory('electronics');
 ```
 
 ### Repository Pattern
@@ -339,6 +352,17 @@ class ProductController extends AbstractController
         $productsArray = array_map(fn($product) => $product->toArray(), $products);
 
         return $this->json($productsArray);
+    }
+
+    #[Route('/products/count', name: 'product_count', methods: ['GET'])]
+    public function count(): Response
+    {
+        $repository = $this->repositoryFactory->getRepository(Product::class);
+        $totalCount = $repository->count();
+        
+        return $this->json([
+            'total' => $totalCount
+        ]);
     }
 
     #[Route('/products/{id}', name: 'product_show', methods: ['GET'])]
@@ -431,6 +455,43 @@ $productsArray = array_map(
 );
 ```
 
+### Optimized Count Operations
+
+SyncopateBundle supports efficient count operations that leverage SyncopateDB's dedicated count API, which returns only the count without retrieving all data:
+
+```php
+// Simple count of all entities
+$repository = $this->repositoryFactory->getRepository(Product::class);
+$totalCount = $repository->count();
+
+// Count with query builder filters
+$queryBuilder = $repository->createQueryBuilder();
+$inStockCount = $queryBuilder
+    ->eq(field: 'inStock', value: true)
+    ->gt(field: 'price', value: 50)
+    ->count();
+
+// Count with pagination info
+$queryBuilder = $repository->createQueryBuilder();
+$filteredCount = $queryBuilder
+    ->contains(field: 'name', value: 'gaming')
+    ->count();
+
+$pageSize = 10;
+$totalPages = ceil($filteredCount / $pageSize);
+```
+
+#### When to use optimized count
+
+The optimized count API is particularly useful for:
+
+1. **Pagination**: Calculate total pages without retrieving all entities
+2. **Performance monitoring**: Check the size of result sets before executing expensive queries
+3. **UI elements**: Display count badges or indicators with minimal database overhead
+4. **Large datasets**: Get counts from tables with millions of records efficiently
+
+This approach significantly reduces memory usage and network traffic compared to retrieving all entities and counting them in PHP.
+
 ### Join Queries
 
 Use join queries to fetch related entities in a single request:
@@ -488,6 +549,14 @@ class ProductService
             entityClass: Product::class,
             criteria: [],
             orderBy: ['price' => 'ASC']
+        );
+    }
+    
+    public function getProductCountByCriteria(array $criteria): int
+    {
+        return $this->syncopateService->count(
+            entityClass: Product::class, 
+            criteria: $criteria
         );
     }
     

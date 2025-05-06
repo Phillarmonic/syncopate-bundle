@@ -256,7 +256,7 @@ class QueryBuilder
     }
 
     /**
-     * Count results
+     * Count results using the optimized count API
      */
     public function count(): int
     {
@@ -267,11 +267,15 @@ class QueryBuilder
             $queryOptions->addFilter($filter);
         }
 
-        // Set the limit to 0 to just get count
-        $queryOptions->setLimit(0);
+        // Set fuzzy options if defined
+        if ($this->fuzzyOptions !== null) {
+            $queryOptions->setFuzzyOpts(
+                $this->fuzzyOptions['threshold'],
+                $this->fuzzyOptions['maxDistance']
+            );
+        }
 
-        $results = $this->syncopateService->query($this->entityClass, $queryOptions);
-        // Todo(PhillarMonkey): check the parsing here
-        return $results['total'] ?? 0;
+        // Use dedicated count API endpoint
+        return $this->syncopateService->count($this->entityClass, $queryOptions);
     }
 }
