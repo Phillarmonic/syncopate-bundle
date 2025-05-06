@@ -2,7 +2,7 @@
     "name": "phillarmonic/syncopate-bundle",
     "description": "Symfony bundle for integrating with SyncopateDB",
     "type": "symfony-bundle",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "license": "MIT",
     "authors": [
         {
