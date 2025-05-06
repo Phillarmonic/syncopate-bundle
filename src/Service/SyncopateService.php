@@ -957,5 +957,27 @@ class SyncopateService
         return $fieldAttr->name;
     }
 
+    /**
+     * Count entities using the optimized count API with joins
+     */
+    public function countJoin(string $className, JoinQueryOptions $joinQueryOptions): int
+    {
+        // Get an entity type from entity class
+        $entityType = $this->entityTypeRegistry->getEntityType($className);
+
+        if ($entityType === null) {
+            throw new \InvalidArgumentException("Class $className is not registered as an entity");
+        }
+
+        // Make sure the query is for the correct entity type
+        if ($joinQueryOptions->getEntityType() !== $entityType) {
+            throw new \InvalidArgumentException("Query entity type does not match class entity type");
+        }
+
+        // Execute count query with joins
+        $response = $this->client->queryJoinCount($joinQueryOptions->toArray());
+
+        return $response['count'] ?? 0;
+    }
 
 }

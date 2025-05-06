@@ -481,6 +481,46 @@ $pageSize = 10;
 $totalPages = ceil($filteredCount / $pageSize);
 ```
 
+#### Count with Join Queries
+
+The count API also supports join operations, allowing you to count entities based on related data:
+
+```php
+// Count posts with comments from the last 7 days
+$repository = $this->repositoryFactory->getRepository(Post::class);
+$joinQueryBuilder = $repository->createJoinQueryBuilder();
+
+$recentlyCommentedPostsCount = $joinQueryBuilder
+    ->innerJoin(
+        entityType: 'comment',
+        localField: 'id',
+        foreignField: 'postId',
+        as: 'comments'
+    )
+    ->gt(field: 'comments.createdAt', value: new \DateTime('-7 days'))
+    ->count();
+
+// Count users who have purchased a specific product
+$repository = $this->repositoryFactory->getRepository(User::class);
+$joinQueryBuilder = $repository->createJoinQueryBuilder();
+
+$purchaserCount = $joinQueryBuilder
+    ->innerJoin(
+        entityType: 'order',
+        localField: 'id',
+        foreignField: 'userId',
+        as: 'orders'
+    )
+    ->innerJoin(
+        entityType: 'order_item',
+        localField: 'orders.id',
+        foreignField: 'orderId',
+        as: 'items'
+    )
+    ->eq(field: 'items.productId', value: $productId)
+    ->count();
+```
+
 #### When to use optimized count
 
 The optimized count API is particularly useful for:
@@ -489,6 +529,7 @@ The optimized count API is particularly useful for:
 2. **Performance monitoring**: Check the size of result sets before executing expensive queries
 3. **UI elements**: Display count badges or indicators with minimal database overhead
 4. **Large datasets**: Get counts from tables with millions of records efficiently
+5. **Complex joins**: Determine relationship counts without materializing all related entities
 
 This approach significantly reduces memory usage and network traffic compared to retrieving all entities and counting them in PHP.
 

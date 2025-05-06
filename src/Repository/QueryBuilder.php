@@ -257,6 +257,11 @@ class QueryBuilder
 
     /**
      * Count results using the optimized count API
+     *
+     * This method performs the calculation of how many elements a query will
+     * result in, without actually getting the entire data.
+     *
+     * The calculation is performed in the database Backend
      */
     public function count(): int
     {
