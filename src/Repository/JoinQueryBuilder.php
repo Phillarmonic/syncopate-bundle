@@ -268,4 +268,28 @@ class JoinQueryBuilder extends QueryBuilder
         $reflection->setAccessible(true);
         return $reflection->getValue($this);
     }
+
+    /**
+     * @inheritDoc
+     */
+    public function count(): int
+    {
+        // Get an entity type from parent class private properties
+        $entityType = $this->getEntityType();
+
+        $joinQueryOptions = new JoinQueryOptions($entityType);
+
+        // Add filters from the parent class
+        foreach ($this->getFilters() as $filter) {
+            $joinQueryOptions->addFilter($filter);
+        }
+
+        // Add joins
+        foreach ($this->joins as $join) {
+            $joinQueryOptions->addJoin($join);
+        }
+
+        // Pass to SyncopateService for count
+        return $this->getSyncopateService()->countJoin($this->getEntityClass(), $joinQueryOptions);
+    }
 }

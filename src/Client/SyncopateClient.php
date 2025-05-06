@@ -427,6 +427,39 @@ class SyncopateClient
     }
 
     /**
+     * Execute a count query
+     */
+    public function queryCount(array $queryOptions): array
+    {
+        // Deep sanitize to fix an array to string conversion issues
+        $sanitized = $this->deepSanitizeArray($queryOptions);
+
+        // Additional check for data type issues when strict checking is enabled
+        if ($this->strictTypeChecking) {
+            $this->validateQueryOptions($sanitized);
+        }
+
+        return $this->request('POST', '/api/v1/query/count', ['json' => $sanitized]);
+    }
+
+    /**
+     * Execute a count query with joins
+     */
+    public function queryJoinCount(array $joinQueryOptions): array
+    {
+        // Deep sanitize to fix an array to string conversion issues
+        $sanitized = $this->deepSanitizeArray($joinQueryOptions);
+
+        // Additional check for data type issues when strict checking is enabled
+        if ($this->strictTypeChecking) {
+            $this->validateQueryOptions($sanitized);
+        }
+
+        // The count endpoint accepts both regular queries and join queries
+        return $this->request('POST', '/api/v1/query/count', ['json' => $sanitized]);
+    }
+
+    /**
      * Generate a cURL command from request parameters
      * This is for investigation when breakpoint debugging
      */

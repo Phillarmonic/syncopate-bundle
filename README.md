@@ -2,6 +2,13 @@
 
 A Symfony bundle for integrating with SyncopateDB, a flexible, lightweight data store with advanced query capabilities.
 
+## Compatibility between the bundle and SyncopateDB
+
+| Syncopate Bundle Versions | SyncopateDB Server Versions | State                  |
+|:------------------------- |:--------------------------- |:----------------------:|
+| 1.x                       | 0.x                         | Active development     |
+| 2.x (planned)             | 1.x (planned)               | Planned future version |
+
 ## Installation
 
 ### Step 1: Install the Bundle
@@ -66,7 +73,7 @@ use Phillarmonic\SyncopateBundle\Trait\EntityTrait;
 class Product
 {
     use EntityTrait; // Include the EntityTrait to add array conversion methods
-    
+
     public ?string $id = null;
 
     #[Field(type: 'string', indexed: true, required: true)]
@@ -118,6 +125,7 @@ $renamedFields = $product->toArray(
 ```
 
 The `toArray()` method has three optional parameters:
+
 - `$fields` - When provided, only these fields will be included
 - `$exclude` - Fields to exclude from the result
 - `$mapping` - Maps property names to custom keys in the result
@@ -143,7 +151,7 @@ use DateTimeInterface;
 class Post
 {
     use EntityTrait;
-    
+
     #[Field]
     private ?int $id = null;
 
@@ -172,7 +180,7 @@ class Post
 class Comment
 {
     use EntityTrait;
-    
+
     #[Field]
     private ?int $id = null;
 
@@ -195,12 +203,14 @@ class Comment
 ```
 
 Supported relationship types:
+
 - `TYPE_ONE_TO_ONE`: Single reference in both directions
 - `TYPE_ONE_TO_MANY`: Collection on one side, single reference on the other
 - `TYPE_MANY_TO_ONE`: Single reference on one side, collection on the other
 - `TYPE_MANY_TO_MANY`: Collections on both sides
 
 Cascade options:
+
 - `CASCADE_NONE`: No cascading actions (default)
 - `CASCADE_REMOVE`: Automatically delete related entities when the parent is deleted
 
@@ -231,7 +241,7 @@ class ProductRepository extends EntityRepository
             ->orderBy(field: 'price', direction: 'ASC')
             ->getResult();
     }
-    
+
     /**
      * Find featured products
      */
@@ -244,14 +254,14 @@ class ProductRepository extends EntityRepository
             ->limit(limit: $limit)
             ->getResult();
     }
-    
+
     /**
      * Get products formatted for API response
      */
     public function getProductsForApi(): array
     {
         $products = $this->findAll();
-        
+
         return array_map(function(Product $product) {
             return $product->toArray(
                 mapping: [
@@ -261,6 +271,16 @@ class ProductRepository extends EntityRepository
                 ]
             );
         }, $products);
+    }
+
+    /**
+     * Count products by category using optimized count API
+     */
+    public function countByCategory(string $category): int
+    {
+        return $this->createQueryBuilder()
+            ->eq(field: 'category', value: $category)
+            ->count();
     }
 }
 ```
@@ -286,7 +306,7 @@ use Phillarmonic\SyncopateBundle\Trait\EntityTrait;
 class Product
 {
     use EntityTrait;
-    
+
     // ... property definitions
 }
 ```
@@ -303,6 +323,9 @@ $midRangeProducts = $repository->findByPriceRange(minPrice: 20, maxPrice: 50);
 
 // Get API-formatted products
 $apiProducts = $repository->getProductsForApi();
+
+// Get count of products in a category
+$electronicsCount = $repository->countByCategory('electronics');
 ```
 
 ### Repository Pattern
@@ -339,6 +362,17 @@ class ProductController extends AbstractController
         $productsArray = array_map(fn($product) => $product->toArray(), $products);
 
         return $this->json($productsArray);
+    }
+
+    #[Route('/products/count', name: 'product_count', methods: ['GET'])]
+    public function count(): Response
+    {
+        $repository = $this->repositoryFactory->getRepository(Product::class);
+        $totalCount = $repository->count();
+
+        return $this->json([
+            'total' => $totalCount
+        ]);
     }
 
     #[Route('/products/{id}', name: 'product_show', methods: ['GET'])]
@@ -393,7 +427,7 @@ class ProductController extends AbstractController
     public function delete(string $id): Response
     {
         $repository = $this->repositoryFactory->getRepository(Product::class);
-        
+
         // Will automatically delete related entities with CASCADE_REMOVE
         $success = $repository->deleteById(id: $id);
 
@@ -431,6 +465,84 @@ $productsArray = array_map(
 );
 ```
 
+### Optimized Count Operations
+
+SyncopateBundle supports efficient count operations that leverage SyncopateDB's dedicated count API, which returns only the count without retrieving all data:
+
+```php
+// Simple count of all entities
+$repository = $this->repositoryFactory->getRepository(Product::class);
+$totalCount = $repository->count();
+
+// Count with query builder filters
+$queryBuilder = $repository->createQueryBuilder();
+$inStockCount = $queryBuilder
+    ->eq(field: 'inStock', value: true)
+    ->gt(field: 'price', value: 50)
+    ->count();
+
+// Count with pagination info
+$queryBuilder = $repository->createQueryBuilder();
+$filteredCount = $queryBuilder
+    ->contains(field: 'name', value: 'gaming')
+    ->count();
+
+$pageSize = 10;
+$totalPages = ceil($filteredCount / $pageSize);
+```
+
+#### Count with Join Queries
+
+The count API also supports join operations, allowing you to count entities based on related data:
+
+```php
+// Count posts with comments from the last 7 days
+$repository = $this->repositoryFactory->getRepository(Post::class);
+$joinQueryBuilder = $repository->createJoinQueryBuilder();
+
+$recentlyCommentedPostsCount = $joinQueryBuilder
+    ->innerJoin(
+        entityType: 'comment',
+        localField: 'id',
+        foreignField: 'postId',
+        as: 'comments'
+    )
+    ->gt(field: 'comments.createdAt', value: new \DateTime('-7 days'))
+    ->count();
+
+// Count users who have purchased a specific product
+$repository = $this->repositoryFactory->getRepository(User::class);
+$joinQueryBuilder = $repository->createJoinQueryBuilder();
+
+$purchaserCount = $joinQueryBuilder
+    ->innerJoin(
+        entityType: 'order',
+        localField: 'id',
+        foreignField: 'userId',
+        as: 'orders'
+    )
+    ->innerJoin(
+        entityType: 'order_item',
+        localField: 'orders.id',
+        foreignField: 'orderId',
+        as: 'items'
+    )
+    ->eq(field: 'items.productId', value: $productId)
+    ->count();
+```
+
+#### When to use optimized count
+
+The optimized count API is particularly useful for:
+
+1. **Pagination**: Calculate total pages without retrieving all entities
+2. **Performance monitoring**: Check the size of result sets before executing expensive queries
+3. **UI elements**: Display count badges or indicators with minimal database overhead
+4. **Large datasets**: Get counts from tables with millions of records efficiently
+5. **Complex joins**: Determine relationship counts without materializing all related entities
+
+This approach significantly reduces memory usage and network traffic compared to retrieving all entities and counting them in PHP.
+
 ### Join Queries
 
 Use join queries to fetch related entities in a single request:
@@ -453,13 +565,13 @@ $posts = $joinQueryBuilder
 $postsData = [];
 foreach ($posts as $post) {
     $postData = $post->extract(fields: ['title', 'content', 'createdAt']);
-    
+
     // Map comments to array with only necessary fields
     $postData['comments'] = array_map(
         fn($comment) => $comment->extract(fields: ['content']),
         $post->comments
     );
-    
+
     $postsData[] = $postData;
 }
 ```
@@ -490,7 +602,15 @@ class ProductService
             orderBy: ['price' => 'ASC']
         );
     }
-    
+
+    public function getProductCountByCriteria(array $criteria): int
+    {
+        return $this->syncopateService->count(
+            entityClass: Product::class, 
+            criteria: $criteria
+        );
+    }
+
     public function deleteProductWithRelations(string $id): bool
     {
         // Will automatically handle cascade delete based on relationship attributes
@@ -500,11 +620,11 @@ class ProductService
             enableCascade: true
         );
     }
-    
+
     public function getProductsForApi(): array
     {
         $products = $this->getProductsByPriceRange(min: 10, max: 100);
-        
+
         // Transform for API response using EntityTrait
         return array_map(
             fn($product) => $product->toArray(
