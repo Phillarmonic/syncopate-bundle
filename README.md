@@ -4,10 +4,10 @@ A Symfony bundle for integrating with SyncopateDB, a flexible, lightweight data 
 
 ## Compatibility between the bundle and SyncopateDB
 
-| Syncopate Bundle Versions | SyncopateDB Versions | State              |
-|:------------------------- |:-------------------- |:------------------:|
-| 1.x                       | 0.x                  | Active development |
-| 2.x (planned)             | 1.x (planned)        | (planned)          |
+| Syncopate Bundle Versions | SyncopateDB Server Versions | State                  |
+|:------------------------- |:--------------------------- |:----------------------:|
+| 1.x                       | 0.x                         | Active development     |
+| 2.x (planned)             | 1.x (planned)               | Planned future version |
 
 ## Installation
 
