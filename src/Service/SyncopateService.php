@@ -5,6 +5,7 @@ namespace Phillarmonic\SyncopateBundle\Service;
 use Phillarmonic\SyncopateBundle\Attribute\Relationship;
 use Phillarmonic\SyncopateBundle\Client\SyncopateClient;
 use Phillarmonic\SyncopateBundle\Exception\SyncopateApiException;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateIntegrityConstraintException;
 use Phillarmonic\SyncopateBundle\Exception\SyncopateValidationException;
 use Phillarmonic\SyncopateBundle\Mapper\EntityMapper;
 use Phillarmonic\SyncopateBundle\Model\EntityDefinition;
@@ -95,6 +96,8 @@ class SyncopateService
 
         // Create entity in SyncopateDB
         $response = $this->client->createEntity($entityType, $data);
+
+        $this->validateResponse($response);
 
         if (!isset($response['id'])) {
             throw new SyncopateApiException("Failed to create entity: ID not returned");
@@ -978,6 +981,50 @@ class SyncopateService
         $response = $this->client->queryJoinCount($joinQueryOptions->toArray());
 
         return $response['count'] ?? 0;
+    }
+
+    private function validateResponse(array $response): void
+    {
+        if (array_key_exists('error', $response)) {
+            // Check for integrity constraint violation (unique constraint)
+            if ($response['code'] === 409 &&
+                str_contains($response['message'], 'unique constraint violation')) {
+
+                // Extract field and value from the error message
+                $matches = [];
+                if (preg_match("/field '([^']+)' with value '([^']+)'/", $response['message'], $matches)) {
+                    $field = $matches[1];
+                    $value = $matches[2];
+
+                    // Create details array to match the format expected by fromApiResponse
+                    $apiResponse = $response;
+                    $apiResponse['details'] = [
+                        'field' => $field,
+                        'value' => $value
+                    ];
+
+                    throw SyncopateIntegrityConstraintException::fromApiResponse($apiResponse);
+                }
+
+                // Fallback if regex doesn't match
+                throw new SyncopateIntegrityConstraintException(
+                    'unknown',
+                    null,
+                    $response['message'],
+                    $response['code'],
+                    null,
+                    $response
+                );
+            }
+
+            // Handle other errors
+            throw new SyncopateApiException(
+                $response['message'] ?? 'Unknown API error',
+                $response['code'] ?? 400,
+                null,
+                $response
+            );
+        }
     }
 
 }
