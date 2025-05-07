@@ -154,6 +154,7 @@ class SyncopateService
 
         // Update entity in SyncopateDB
         $response = $this->client->updateEntity($entityType, (string) $data['id'], $data['fields']);
+        $this->validateResponse($response);
 
         // Return the updated entity without fetching it again to save memory
         $updatedData = [
@@ -191,6 +192,7 @@ class SyncopateService
 
         // Delete entity from SyncopateDB
         $response = $this->client->deleteEntity($entityType, (string) $data['id']);
+        $this->validateResponse($response);
 
         return isset($response['message']) && strpos($response['message'], 'successfully') !== false;
     }
@@ -209,6 +211,7 @@ class SyncopateService
 
         // Delete entity from SyncopateDB
         $response = $this->client->deleteEntity($entityType, (string) $id);
+        $this->validateResponse($response);
 
         return isset($response['message']) && strpos($response['message'], 'successfully') !== false;
     }
