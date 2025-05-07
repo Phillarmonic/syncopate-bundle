@@ -58,7 +58,8 @@ class EntityMapper
                 $fieldType,
                 $fieldAttribute->indexed,
                 $fieldAttribute->required,
-                $fieldAttribute->nullable
+                $fieldAttribute->nullable,
+                $fieldAttribute->unique
             );
 
             $entityDefinition->addField($fieldDefinition);
@@ -66,7 +67,6 @@ class EntityMapper
 
         return $entityDefinition;
     }
-
     /**
      * Map entity data to a PHP object with memory optimization
      */

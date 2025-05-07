@@ -417,7 +417,32 @@ class SyncopateClient
     {
         try {
             // For error responses, they're typically small so we can use toArray
-            return $response->toArray(false);
+            $data = $response->toArray(false);
+    
+            // Additional processing for unique constraint violations
+            // SyncopateDB returns 409 Conflict for unique constraint violations
+            if ($response->getStatusCode() === 409) {
+                // Extract field and value information if available
+                $errorMessage = $data['message'] ?? '';
+
+                // Try to extract field name and value from error message if not explicitly provided
+                if (!isset($data['details']) || !isset($data['details']['field'])) {
+                    // Look for patterns like "field 'email' with value 'test@example.com' already exists"
+                    if (preg_match('/field [\'"]([^\'"]*)[\'"]\s+with\s+value\s+[\'"]([^\'"]*)[\'"]/', $errorMessage, $matches)) {
+                        $data['details'] = $data['details'] ?? [];
+                        $data['details']['field'] = $matches[1];
+                        $data['details']['value'] = $matches[2];
+                    }
+                    // Other common patterns can be added here
+                }
+
+                // Set code if not present
+                if (!isset($data['code'])) {
+                    $data['code'] = 409;
+                }
+            }
+
+            return $data;
         } catch (\Throwable $e) {
             return [
                 'message' => 'Could not parse error response: ' . $e->getMessage(),
@@ -425,7 +450,6 @@ class SyncopateClient
             ];
         }
     }
-
     /**
      * Execute a count query
      */
