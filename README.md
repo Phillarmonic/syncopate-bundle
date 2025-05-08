@@ -640,6 +640,133 @@ class ProductService
 }
 ```
 
+## Error Handling
+
+SyncopateBundle provides comprehensive error handling with specific exception types and detailed error information from SyncopateDB.
+
+### Exception Types
+
+The bundle includes specialized exception classes for different error scenarios:
+
+1. **SyncopateApiException** - Base exception for all SyncopateDB API errors
+2. **SyncopateValidationException** - Thrown when entity validation fails
+3. **SyncopateIntegrityConstraintException** - Thrown when unique constraints are violated
+
+### Error Categories
+
+SyncopateDB errors are organized into categories, each with specific error codes:
+
+- **General Errors (SY001-SY099)** - General API errors, authentication, timeouts
+- **Entity Type Errors (SY100-SY199)** - Issues with entity type definitions
+- **Entity Errors (SY200-SY299)** - Entity validation, constraints, field issues
+- **Query Errors (SY300-SY399)** - Invalid queries, filters, joins
+- **Persistence Errors (SY400-SY499)** - Database storage, backup, recovery issues
+
+### Handling Specific Errors
+
+```php
+use Phillarmonic\SyncopateBundle\Exception\SyncopateApiException;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateValidationException;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateIntegrityConstraintException;
+
+try {
+    $repository = $this->repositoryFactory->getRepository(Product::class);
+    
+    $product = new Product();
+    $product->name = 'Test Product';
+    $product->sku = 'SKU123'; // Assuming SKU has a unique constraint
+    
+    $repository->create($product);
+} catch (SyncopateIntegrityConstraintException $e) {
+    // Handle unique constraint violations
+    $field = $e->getField(); // e.g., 'sku'
+    $value = $e->getValue(); // e.g., 'SKU123'
+    
+    // Get user-friendly message
+    $friendlyMessage = $e->getFriendlyMessage();
+    // e.g., "The sku 'SKU123' is already in use. Please choose a different value."
+    
+    return $this->json([
+        'error' => 'duplicate_entity',
+        'message' => $friendlyMessage,
+        'field' => $field
+    ], 409);
+} catch (SyncopateValidationException $e) {
+    // Handle validation errors with field-specific messages
+    $violations = $e->getViolations();
+    
+    return $this->json([
+        'error' => 'validation_failed',
+        'message' => 'Please fix the following issues:',
+        'violations' => $violations
+    ], 400);
+} catch (SyncopateApiException $e) {
+    // Get detailed error information
+    $httpCode = $e->getCode();
+    $dbCode = $e->getDbCode(); // e.g., 'SY209'
+    $category = $e->getErrorCategory(); // e.g., 'Entity'
+    
+    // Check if it's a client or server error
+    $isClientError = $e->isClientError();
+    
+    // Check for specific error types
+    if ($e->isNotFoundError()) {
+        return $this->json([
+            'error' => 'not_found',
+            'message' => 'The requested resource could not be found.'
+        ], 404);
+    }
+    
+    return $this->json([
+        'error' => 'api_error',
+        'message' => $e->getMessage(),
+        'code' => $dbCode
+    ], $httpCode);
+}
+```
+
+### Common Error Scenarios
+
+#### Entity Not Found (SY200)
+
+```php
+try {
+    $product = $repository->find('non-existent-id');
+} catch (SyncopateApiException $e) {
+    if ($e->isErrorType('SY200')) {
+        // Entity not found handling
+    }
+}
+```
+
+#### Unique Constraint Violation (SY209)
+
+```php
+try {
+    $repository->create($product);
+} catch (SyncopateIntegrityConstraintException $e) {
+    // Specialized exception type with field information
+    $field = $e->getField(); // The field that caused the violation
+    $value = $e->getValue(); // The duplicated value
+}
+```
+
+#### Validation Errors (SY203, SY206, SY207, SY208)
+
+```php
+try {
+    $repository->create($invalidProduct);
+} catch (SyncopateValidationException $e) {
+    // Get all violations as field => message array
+    $violations = $e->getViolations();
+    
+    // Check for a specific field error
+    if ($e->hasViolation('price')) {
+        $priceError = $e->getViolation('price');
+    }
+}
+```
+
 ## Command Line Tools
 
 The bundle provides console commands for managing entities:
@@ -656,6 +783,39 @@ bin/console syncopate:register-entity-types --path=src/CustomEntities
 
 # Register specific entity classes
 bin/console syncopate:register-entity-types --class=App\\Entity\\Product
+```
+
+## Debug Tools
+
+The bundle includes the `DebugHelper` class for troubleshooting common issues:
+
+```php
+use Phillarmonic\SyncopateBundle\Util\DebugHelper;
+
+// Enable detailed debug mode
+DebugHelper::enableDebug();
+
+// Set a custom log callback
+DebugHelper::setLogCallback(function($message, $context) {
+    // Your custom logging implementation
+    $this->logger->debug($message, $context ?? []);
+});
+
+// Check for problematic data types in an array
+$issues = DebugHelper::checkArrayForProblematicTypes($data);
+if (!empty($issues)) {
+    foreach ($issues as $issue) {
+        echo "Issue at {$issue['path']}: {$issue['issue']}\n";
+    }
+}
+
+// Report memory usage
+$memoryInfo = DebugHelper::getMemoryUsage();
+echo "Memory used: {$memoryInfo['current']} (peak: {$memoryInfo['peak']})\n";
+
+// Sanitize data for JSON encoding
+$sanitizedData = DebugHelper::sanitizeForJson($data);
+$json = DebugHelper::tryJsonEncode($sanitizedData);
 ```
 
 ## License
