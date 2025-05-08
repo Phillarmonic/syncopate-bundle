@@ -295,7 +295,16 @@ class SyncopateClient
     }
 
     /**
-     * Send a request to the SyncopateDB API with memory optimization.
+     * Send a request to the SyncopateDB API with memory optimization and improved error handling.
+     *
+     * @param string $method HTTP method (GET, POST, PUT, DELETE)
+     * @param string $endpoint API endpoint
+     * @param array $options Request options
+     * @return array Response data as array
+     *
+     * @throws SyncopateApiException For general API errors
+     * @throws SyncopateIntegrityConstraintException For unique constraint violations
+     * @throws SyncopateValidationException For validation errors
      */
     private function request(string $method, string $endpoint, array $options = []): array
     {
@@ -341,13 +350,35 @@ class SyncopateClient
 
                 // Handle unique constraint violations
                 if ($dbCode === 'SY209') {
-                    throw SyncopateIntegrityConstraintException::fromApiResponse($error);
+                    throw SyncopateIntegrityConstraintException::createFromApiResponse($error);
                 }
 
                 // Handle validation errors
                 if (in_array($dbCode, ['SY203', 'SY206', 'SY207', 'SY208'])) {
-                    throw SyncopateValidationException::fromApiResponse($error);
+                    throw SyncopateValidationException::createFromApiResponse($error);
                 }
+            }
+
+            // Check for implied constraint violations
+            if (($statusCode === 409 || (isset($error['error']) && $error['error'] === 'Conflict')) &&
+                (isset($error['message']) && (
+                    stripos($error['message'], 'unique') !== false ||
+                    stripos($error['message'], 'duplicate') !== false ||
+                    stripos($error['message'], 'constraint') !== false
+                ))
+            ) {
+                throw SyncopateIntegrityConstraintException::createFromApiResponse($error);
+            }
+
+            // Check for implied validation errors
+            if (($statusCode === 400 || (isset($error['error']) && $error['error'] === 'Bad Request')) &&
+                isset($error['message']) && (
+                    stripos($error['message'], 'validation') !== false ||
+                    stripos($error['message'], 'invalid') !== false ||
+                    stripos($error['message'], 'required') !== false
+                ) && (!isset($error['db_code']) || !in_array($error['db_code'], ['SY100', 'SY101', 'SY102']))
+            ) {
+                throw SyncopateValidationException::createFromApiResponse($error);
             }
 
             // Default to generic API exception for other cases
@@ -383,12 +414,12 @@ class SyncopateClient
             );
         }
     }
+
     /**
      * Process response in a memory-efficient way by streaming chunks
      */
     private function processStreamedResponse(ResponseInterface $response): array
     {
-        try {
             // Stream processing is better for large responses
             $contentLength = (int)($response->getHeaders(false)['content-length'][0] ?? 0);
 
@@ -401,13 +432,6 @@ class SyncopateClient
             $this->checkForErrors($responseData);
 
             return $responseData;
-        } catch (\Throwable $e) {
-            throw new SyncopateApiException(
-                'Failed to parse response: ' . $e->getMessage(),
-                0,
-                $e
-            );
-        }
     }
     /**
      * Stream large response to prevent memory issues
