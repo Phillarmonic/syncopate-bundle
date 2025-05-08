@@ -587,9 +587,48 @@ class SyncopateClient
             return;
         }
 
-        // Use the fromApiResponse factory method to create the appropriate exception
-        // This will automatically handle specialized exception types based on db_code
-        throw SyncopateApiException::fromApiResponse($responseData);
+        $errorMessage = $responseData['message'] ?? 'Unknown error';
+        $httpCode = $responseData['code'] ?? 500;
+        $dbCode = $responseData['db_code'] ?? null;
+
+        // Handle specific DB error codes
+        if ($dbCode !== null) {
+            // Entity validation errors
+            if (in_array($dbCode, ['SY203', 'SY206', 'SY207', 'SY208'])) {
+                throw SyncopateValidationException::createFromApiResponse($responseData);
+            }
+
+            // Unique constraint violations
+            if ($dbCode === 'SY209') {
+                throw SyncopateIntegrityConstraintException::createFromApiResponse($responseData);
+            }
+        }
+
+        // Check for implied constraint violations
+        if ($httpCode === 409 && (
+            stripos($errorMessage, 'unique') !== false ||
+            stripos($errorMessage, 'duplicate') !== false ||
+            stripos($errorMessage, 'constraint') !== false
+        )) {
+            throw SyncopateIntegrityConstraintException::createFromApiResponse($responseData);
+        }
+
+        // Check for implied validation errors
+        if ($httpCode === 400 && (
+            stripos($errorMessage, 'validation') !== false ||
+            stripos($errorMessage, 'invalid') !== false ||
+            stripos($errorMessage, 'required') !== false
+        ) && !in_array($dbCode, ['SY100', 'SY101', 'SY102'])) { // Skip entity type errors
+            throw SyncopateValidationException::createFromApiResponse($responseData);
+        }
+
+        // Default case: throw general API exception
+        throw new SyncopateApiException(
+            $errorMessage,
+            $httpCode,
+            null,
+            $responseData
+        );
     }
 
     /**

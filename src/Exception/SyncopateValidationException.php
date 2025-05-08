@@ -103,7 +103,7 @@ class SyncopateValidationException extends \InvalidArgumentException
      * @param string $defaultMessage Default message if none is provided
      * @return self
      */
-    public static function fromApiResponse(array $responseData, string $defaultMessage = "Validation failed"): self
+    public static function createFromApiResponse(array $responseData, string $defaultMessage = "Validation failed"): self
     {
         $message = $responseData['message'] ?? $defaultMessage;
         $code = $responseData['code'] ?? 400;

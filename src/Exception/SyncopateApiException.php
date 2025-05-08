@@ -115,62 +115,29 @@ class SyncopateApiException extends \RuntimeException
         }
 
         $prefix = substr($this->dbCode, 0, 3);
-        switch ($prefix) {
-            case 'SY0':
-                return 'General';
-            case 'SY1':
-                return 'Entity Type';
-            case 'SY2':
-                return 'Entity';
-            case 'SY3':
-                return 'Query';
-            case 'SY4':
-                return 'Persistence';
-            default:
-                return 'Unknown';
-        }
+        return match ($prefix) {
+            'SY0' => 'General',
+            'SY1' => 'Entity Type',
+            'SY2' => 'Entity',
+            'SY3' => 'Query',
+            'SY4' => 'Persistence',
+            default => 'Unknown',
+        };
     }
 
     /**
      * Create an exception from an API response
      *
      * @param array $apiResponse The API response data
-     * @return SyncopateValidationException
+     * @return SyncopateApiException Always returns a SyncopateApiException or a subclass instance
      */
-    public static function fromApiResponse(array $apiResponse): SyncopateValidationException
+    public static function fromApiResponse(array $apiResponse): SyncopateApiException
     {
         $message = $apiResponse['message'] ?? 'Unknown API error';
         $code = $apiResponse['code'] ?? 500;
-
-        // Check for specialized exception types
         $dbCode = $apiResponse['db_code'] ?? null;
 
-        if ($dbCode) {
-            // Unique constraint violations
-            if ($dbCode === 'SY209') {
-                return SyncopateIntegrityConstraintException::fromApiResponse($apiResponse);
-            }
-
-            // Validation errors
-            if (in_array($dbCode, ['SY203', 'SY206', 'SY207', 'SY208'])) {
-                return SyncopateValidationException::fromApiResponse($apiResponse);
-            }
-        }
-
-        // For status code 409 without a db_code, try to determine if it's a unique constraint
-        if (($code === 409 || stripos($message, 'unique') !== false || stripos($message, 'duplicate') !== false)
-            && !$dbCode) {
-            return SyncopateIntegrityConstraintException::fromApiResponse($apiResponse);
-        }
-
-        // For status code 400 with validation-like messages
-        if ($code === 400 && (
-            stripos($message, 'validation') !== false ||
-            stripos($message, 'invalid') !== false ||
-            stripos($message, 'required') !== false)) {
-            return SyncopateValidationException::fromApiResponse($apiResponse);
-        }
-
-        return new self($message, $code, null, $apiResponse);
+        // For any error, return a general API exception
+        return new static($message, $code, null, $apiResponse);
     }
 }

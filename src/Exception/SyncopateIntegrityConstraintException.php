@@ -68,12 +68,41 @@ class SyncopateIntegrityConstraintException extends SyncopateApiException
     }
 
     /**
-     * Create an exception from an API response
+     * Check if the violation is for a specific field
+     *
+     * @param string $fieldName The field name to check
+     * @return bool
+     */
+    public function isFieldViolation(string $fieldName): bool
+    {
+        return $this->field === $fieldName;
+    }
+
+    /**
+     * Get a user-friendly error message
+     *
+     * @return string
+     */
+    public function getFriendlyMessage(): string
+    {
+        if (is_string($this->value) || is_numeric($this->value)) {
+            return sprintf(
+                'The %s "%s" is already in use. Please choose a different value.',
+                $this->field,
+                $this->value
+            );
+        }
+
+        return sprintf('The provided %s is already in use. Please choose a different value.', $this->field);
+    }
+
+    /**
+     * Create an integrity constraint exception from API response data
      *
      * @param array $apiResponse The API response data
-     * @return self
+     * @return SyncopateIntegrityConstraintException
      */
-    public static function fromApiResponse(array $apiResponse): self
+    public static function createFromApiResponse(array $apiResponse): SyncopateIntegrityConstraintException
     {
         $message = $apiResponse['message'] ?? 'Integrity constraint violation';
         $field = 'unknown';
@@ -120,38 +149,6 @@ class SyncopateIntegrityConstraintException extends SyncopateApiException
             }
         }
 
-        // Log the dbCode in parent class
-        $apiResponse['db_code'] = $dbCode ?? 'SY209'; // Default to unique constraint code if missing
-
         return new self($field, $value, $message, $code, null, $apiResponse);
-    }
-
-    /**
-     * Check if the violation is for a specific field
-     *
-     * @param string $fieldName The field name to check
-     * @return bool
-     */
-    public function isFieldViolation(string $fieldName): bool
-    {
-        return $this->field === $fieldName;
-    }
-
-    /**
-     * Get a user-friendly error message
-     *
-     * @return string
-     */
-    public function getFriendlyMessage(): string
-    {
-        if (is_string($this->value) || is_numeric($this->value)) {
-            return sprintf(
-                'The %s "%s" is already in use. Please choose a different value.',
-                $this->field,
-                $this->value
-            );
-        }
-
-        return sprintf('The provided %s is already in use. Please choose a different value.', $this->field);
     }
 }
