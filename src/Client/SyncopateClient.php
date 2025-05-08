@@ -301,26 +301,56 @@ class SyncopateClient
     {
         $url = $this->baseUrl . $endpoint;
         $requestOptions = array_merge($this->defaultOptions, $options);
-        $requestOptions['buffer'] = false;
+        $requestOptions['buffer'] = false; // Prevent buffering for memory optimization
 
-        // Validate/sanitize JSON payload
+        // Debug: log the request if debug mode is enabled
+        if ($this->strictTypeChecking && isset($requestOptions['json'])) {
+            $this->validateRequestData($requestOptions['json']);
+        }
+
+        // Sanitize the JSON payload to prevent encoding errors
         if (isset($requestOptions['json']) && is_array($requestOptions['json'])) {
             try {
                 json_encode($requestOptions['json'], JSON_THROW_ON_ERROR);
             } catch (\JsonException $e) {
+                // Use DebugHelper to sanitize JSON if encoding fails
                 $requestOptions['json'] = DebugHelper::sanitizeForJson($requestOptions['json']);
             }
         }
 
         try {
+            // Send the request
             $response = $this->httpClient->request($method, $url, $requestOptions);
-            return $this->processStreamedResponse($response);
+
+            // Process the response with memory optimization
+            $responseData = $this->processStreamedResponse($response);
+
+            // Check for errors in the response
+            $this->checkForErrors($responseData);
+
+            return $responseData;
         } catch (ClientException | ServerException $e) {
-            // These are the specific HTTP exceptions that are actually thrown
+            // Handle HTTP client exceptions (4xx, 5xx responses)
             $response = $e->getResponse();
             $statusCode = $response instanceof ResponseInterface ? $response->getStatusCode() : 0;
             $error = $response instanceof ResponseInterface ? $this->parseErrorResponse($response) : [];
 
+            // Check if this is a specific type of error and throw appropriate exception
+            if (isset($error['db_code'])) {
+                $dbCode = $error['db_code'];
+
+                // Handle unique constraint violations
+                if ($dbCode === 'SY209') {
+                    throw SyncopateIntegrityConstraintException::fromApiResponse($error);
+                }
+
+                // Handle validation errors
+                if (in_array($dbCode, ['SY203', 'SY206', 'SY207', 'SY208'])) {
+                    throw SyncopateValidationException::fromApiResponse($error);
+                }
+            }
+
+            // Default to generic API exception for other cases
             throw new SyncopateApiException(
                 $error['message'] ?? $e->getMessage(),
                 $statusCode,
@@ -328,18 +358,24 @@ class SyncopateClient
                 $error
             );
         } catch (TransportExceptionInterface $e) {
+            // Handle network/transport errors
             throw new SyncopateApiException(
                 'Network error communicating with SyncopateDB API: ' . $e->getMessage(),
                 0,
                 $e
             );
+        } catch (SyncopateApiException | SyncopateIntegrityConstraintException | SyncopateValidationException $e) {
+            // Re-throw exceptions that were already properly formatted
+            throw $e;
         } catch (\JsonException $e) {
+            // Handle JSON encoding/decoding errors
             throw new SyncopateApiException(
-                'Failed to encode request data to JSON: ' . $e->getMessage(),
+                'Failed to process JSON data: ' . $e->getMessage(),
                 0,
                 $e
             );
         } catch (\Throwable $e) {
+            // Handle any other unexpected errors
             throw new SyncopateApiException(
                 'Unexpected error communicating with SyncopateDB API: ' . $e->getMessage(),
                 0,
@@ -347,7 +383,6 @@ class SyncopateClient
             );
         }
     }
-
     /**
      * Process response in a memory-efficient way by streaming chunks
      */
@@ -653,4 +688,48 @@ class SyncopateClient
             }
         }
     }
+
+    /**
+     * Validate request data before sending to prevent common errors
+     *
+     * @param array $data The request data to validate
+     * @throws SyncopateValidationException If validation fails
+     */
+    private function validateRequestData(array $data): void
+    {
+        $issues = [];
+
+        // Check for potential issues with data
+        foreach ($data as $key => $value) {
+            // Check for non-UTF8 strings that might cause JSON encoding issues
+            if (is_string($value) && !mb_check_encoding($value, 'UTF-8')) {
+                $issues[$key] = 'Contains non-UTF8 characters that may cause encoding issues';
+            }
+
+            // Check for resource values that can't be serialized
+            if (is_resource($value)) {
+                $issues[$key] = 'Contains a resource that cannot be serialized';
+            }
+
+            // Recursively check nested arrays
+            if (is_array($value)) {
+                try {
+                    $this->validateRequestData($value);
+                } catch (SyncopateValidationException $e) {
+                    foreach ($e->getViolations() as $nestedKey => $message) {
+                        $issues["$key.$nestedKey"] = $message;
+                    }
+                }
+            }
+        }
+
+        if (!empty($issues)) {
+            $exception = SyncopateValidationException::create('Request data validation failed');
+            foreach ($issues as $key => $message) {
+                $exception->addViolation($key, $message);
+            }
+            throw $exception;
+        }
+    }
+
 }
