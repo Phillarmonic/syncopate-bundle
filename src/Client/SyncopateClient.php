@@ -3,6 +3,8 @@
 namespace Phillarmonic\SyncopateBundle\Client;
 
 use Phillarmonic\SyncopateBundle\Exception\SyncopateApiException;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateIntegrityConstraintException;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateValidationException;
 use Phillarmonic\SyncopateBundle\Util\DebugHelper;
 use Symfony\Component\HttpClient\Exception\ClientException;
 use Symfony\Component\HttpClient\Exception\ServerException;
@@ -351,15 +353,19 @@ class SyncopateClient
      */
     private function processStreamedResponse(ResponseInterface $response): array
     {
-        // Stream processing is better for large responses
-        $contentLength = $response->getHeaders(false)['content-length'][0] ?? 0;
-        if ((int)$contentLength > self::RESPONSE_CHUNK_SIZE) {
-            return $this->streamResponse($response);
-        }
-
-        // For smaller responses, standard processing is fine
         try {
-            return $response->toArray(false);
+            // Stream processing is better for large responses
+            $contentLength = (int)($response->getHeaders(false)['content-length'][0] ?? 0);
+
+            // Process the response based on size
+            $responseData = $contentLength > self::RESPONSE_CHUNK_SIZE
+                ? $this->streamResponse($response)
+                : $response->toArray(false);
+
+            // Validate the response
+            $this->checkForErrors($responseData);
+
+            return $responseData;
         } catch (\Throwable $e) {
             throw new SyncopateApiException(
                 'Failed to parse response: ' . $e->getMessage(),
@@ -368,7 +374,6 @@ class SyncopateClient
             );
         }
     }
-
     /**
      * Stream large response to prevent memory issues
      */
@@ -418,7 +423,7 @@ class SyncopateClient
         try {
             // For error responses, they're typically small so we can use toArray
             $data = $response->toArray(false);
-    
+
             // Additional processing for unique constraint violations
             // SyncopateDB returns 409 Conflict for unique constraint violations
             if ($response->getStatusCode() === 409) {
@@ -529,5 +534,123 @@ class SyncopateClient
         }
 
         return $curlCommand;
+    }
+
+    /**
+     * Check for errors in the API response and throw appropriate exceptions
+     *
+     * @param array $responseData The response data from the API
+     * @throws SyncopateApiException
+     * @throws SyncopateIntegrityConstraintException
+     * @throws SyncopateValidationException
+     */
+    private function checkForErrors(array $responseData): void
+    {
+        // Check if response contains an error
+        if (isset($responseData['error']) || isset($responseData['code']) || isset($responseData['db_code'])) {
+            $errorMessage = $responseData['message'] ?? 'Unknown error';
+            $httpCode = $responseData['code'] ?? 500;
+            $dbCode = $responseData['db_code'] ?? null;
+
+            // Process based on DB code if available
+            if ($dbCode !== null) {
+                // Handle unique constraint violations (SY209)
+                if ($dbCode === 'SY209') {
+                    // Extract field and value information from the error message
+                    $field = 'unknown';
+                    $value = null;
+
+                    if (isset($responseData['details']) && isset($responseData['details']['field'])) {
+                        $field = $responseData['details']['field'];
+                        $value = $responseData['details']['value'] ?? null;
+                    } else {
+                        // Try to extract from error message using regex
+                        if (preg_match('/field [\'"]([^\'"]*)[\'"]\s+with\s+value\s+[\'"]([^\'"]*)[\'"]/', $errorMessage, $matches)) {
+                            $field = $matches[1];
+                            $value = $matches[2];
+                        }
+                    }
+
+                    throw new SyncopateIntegrityConstraintException(
+                        $field,
+                        $value,
+                        $errorMessage,
+                        $httpCode,
+                        null,
+                        $responseData
+                    );
+                }
+
+                // Handle entity validation errors (SY203, SY206, SY207, SY208)
+                if (in_array($dbCode, ['SY203', 'SY206', 'SY207', 'SY208'])) {
+                    $exception = SyncopateValidationException::create($errorMessage);
+
+                    // Try to add specific field violations if available
+                    if (isset($responseData['details']) && isset($responseData['details']['fields'])) {
+                        foreach ($responseData['details']['fields'] as $field => $fieldError) {
+                            $exception->addViolation($field, is_string($fieldError) ? $fieldError : json_encode($fieldError));
+                        }
+                    } else {
+                        // Try to extract field name from the error message
+                        if (preg_match('/field [\'"]([^\'"]*)[\'"]/i', $errorMessage, $matches)) {
+                            $field = $matches[1];
+                            $exception->addViolation($field, $errorMessage);
+                        }
+                    }
+
+                    throw $exception;
+                }
+
+                // Handle entity didn't found errors (SY200)
+                if ($dbCode === 'SY200') {
+                    throw new SyncopateApiException(
+                        $errorMessage,
+                        $httpCode,
+                        null,
+                        $responseData
+                    );
+                }
+
+                // Handle entity type not found errors (SY100)
+                if ($dbCode === 'SY100') {
+                    throw new SyncopateApiException(
+                        $errorMessage,
+                        $httpCode,
+                        null,
+                        $responseData
+                    );
+                }
+
+                // Handle query errors (SY300-SY399)
+                if (preg_match('/^SY3\d{2}$/', $dbCode)) {
+                    throw new SyncopateApiException(
+                        $errorMessage,
+                        $httpCode,
+                        null,
+                        $responseData
+                    );
+                }
+
+                // Handle persistence errors (SY400-SY499)
+                if (preg_match('/^SY4\d{2}$/', $dbCode)) {
+                    throw new SyncopateApiException(
+                        "Database persistence error: $errorMessage",
+                        $httpCode,
+                        null,
+                        $responseData
+                    );
+                }
+            }
+
+            // For any other errors, throw a generic SyncopateApiException
+            if (isset($responseData['error'])) {
+                throw new SyncopateApiException(
+                    $errorMessage,
+                    $httpCode,
+                    null,
+                    $responseData
+                );
+            }
+        }
     }
 }
