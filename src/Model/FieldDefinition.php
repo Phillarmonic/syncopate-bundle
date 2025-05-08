@@ -19,19 +19,22 @@ class FieldDefinition
     private bool $indexed;
     private bool $required;
     private bool $nullable;
+    private bool $unique;
 
     public function __construct(
         string $name,
         string $type,
         bool $indexed = false,
         bool $required = false,
-        bool $nullable = true
+        bool $nullable = true,
+        bool $unique = false
     ) {
         $this->name = $name;
         $this->type = $type;
         $this->indexed = $indexed;
         $this->required = $required;
         $this->nullable = $nullable;
+        $this->unique = $unique;
     }
 
     public function getName(): string
@@ -59,6 +62,11 @@ class FieldDefinition
         return $this->nullable;
     }
 
+    public function isUnique(): bool
+    {
+        return $this->unique;
+    }
+
     /**
      * Convert to array for API request
      */
@@ -70,6 +78,7 @@ class FieldDefinition
             'indexed' => $this->indexed,
             'required' => $this->required,
             'nullable' => $this->nullable,
+            'unique' => $this->unique,
         ];
     }
 
@@ -83,7 +92,8 @@ class FieldDefinition
             $data['type'],
             $data['indexed'] ?? false,
             $data['required'] ?? false,
-            $data['nullable'] ?? true
+            $data['nullable'] ?? true,
+            $data['unique'] ?? false
         );
     }
 

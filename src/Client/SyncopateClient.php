@@ -3,6 +3,8 @@
 namespace Phillarmonic\SyncopateBundle\Client;
 
 use Phillarmonic\SyncopateBundle\Exception\SyncopateApiException;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateIntegrityConstraintException;
+use Phillarmonic\SyncopateBundle\Exception\SyncopateValidationException;
 use Phillarmonic\SyncopateBundle\Util\DebugHelper;
 use Symfony\Component\HttpClient\Exception\ClientException;
 use Symfony\Component\HttpClient\Exception\ServerException;
@@ -293,32 +295,93 @@ class SyncopateClient
     }
 
     /**
-     * Send a request to the SyncopateDB API with memory optimization.
+     * Send a request to the SyncopateDB API with memory optimization and improved error handling.
+     *
+     * @param string $method HTTP method (GET, POST, PUT, DELETE)
+     * @param string $endpoint API endpoint
+     * @param array $options Request options
+     * @return array Response data as array
+     *
+     * @throws SyncopateApiException For general API errors
+     * @throws SyncopateIntegrityConstraintException For unique constraint violations
+     * @throws SyncopateValidationException For validation errors
      */
     private function request(string $method, string $endpoint, array $options = []): array
     {
         $url = $this->baseUrl . $endpoint;
         $requestOptions = array_merge($this->defaultOptions, $options);
-        $requestOptions['buffer'] = false;
+        $requestOptions['buffer'] = false; // Prevent buffering for memory optimization
 
-        // Validate/sanitize JSON payload
+        // Debug: log the request if debug mode is enabled
+        if ($this->strictTypeChecking && isset($requestOptions['json'])) {
+            $this->validateRequestData($requestOptions['json']);
+        }
+
+        // Sanitize the JSON payload to prevent encoding errors
         if (isset($requestOptions['json']) && is_array($requestOptions['json'])) {
             try {
                 json_encode($requestOptions['json'], JSON_THROW_ON_ERROR);
             } catch (\JsonException $e) {
+                // Use DebugHelper to sanitize JSON if encoding fails
                 $requestOptions['json'] = DebugHelper::sanitizeForJson($requestOptions['json']);
             }
         }
 
         try {
+            // Send the request
             $response = $this->httpClient->request($method, $url, $requestOptions);
-            return $this->processStreamedResponse($response);
+
+            // Process the response with memory optimization
+            $responseData = $this->processStreamedResponse($response);
+
+            // Check for errors in the response
+            $this->checkForErrors($responseData);
+
+            return $responseData;
         } catch (ClientException | ServerException $e) {
-            // These are the specific HTTP exceptions that are actually thrown
+            // Handle HTTP client exceptions (4xx, 5xx responses)
             $response = $e->getResponse();
             $statusCode = $response instanceof ResponseInterface ? $response->getStatusCode() : 0;
             $error = $response instanceof ResponseInterface ? $this->parseErrorResponse($response) : [];
 
+            // Check if this is a specific type of error and throw appropriate exception
+            if (isset($error['db_code'])) {
+                $dbCode = $error['db_code'];
+
+                // Handle unique constraint violations
+                if ($dbCode === 'SY209') {
+                    throw SyncopateIntegrityConstraintException::createFromApiResponse($error);
+                }
+
+                // Handle validation errors
+                if (in_array($dbCode, ['SY203', 'SY206', 'SY207', 'SY208'])) {
+                    throw SyncopateValidationException::createFromApiResponse($error);
+                }
+            }
+
+            // Check for implied constraint violations
+            if (($statusCode === 409 || (isset($error['error']) && $error['error'] === 'Conflict')) &&
+                (isset($error['message']) && (
+                    stripos($error['message'], 'unique') !== false ||
+                    stripos($error['message'], 'duplicate') !== false ||
+                    stripos($error['message'], 'constraint') !== false
+                ))
+            ) {
+                throw SyncopateIntegrityConstraintException::createFromApiResponse($error);
+            }
+
+            // Check for implied validation errors
+            if (($statusCode === 400 || (isset($error['error']) && $error['error'] === 'Bad Request')) &&
+                isset($error['message']) && (
+                    stripos($error['message'], 'validation') !== false ||
+                    stripos($error['message'], 'invalid') !== false ||
+                    stripos($error['message'], 'required') !== false
+                ) && (!isset($error['db_code']) || !in_array($error['db_code'], ['SY100', 'SY101', 'SY102']))
+            ) {
+                throw SyncopateValidationException::createFromApiResponse($error);
+            }
+
+            // Default to generic API exception for other cases
             throw new SyncopateApiException(
                 $error['message'] ?? $e->getMessage(),
                 $statusCode,
@@ -326,18 +389,24 @@ class SyncopateClient
                 $error
             );
         } catch (TransportExceptionInterface $e) {
+            // Handle network/transport errors
             throw new SyncopateApiException(
                 'Network error communicating with SyncopateDB API: ' . $e->getMessage(),
                 0,
                 $e
             );
+        } catch (SyncopateApiException | SyncopateIntegrityConstraintException | SyncopateValidationException $e) {
+            // Re-throw exceptions that were already properly formatted
+            throw $e;
         } catch (\JsonException $e) {
+            // Handle JSON encoding/decoding errors
             throw new SyncopateApiException(
-                'Failed to encode request data to JSON: ' . $e->getMessage(),
+                'Failed to process JSON data: ' . $e->getMessage(),
                 0,
                 $e
             );
         } catch (\Throwable $e) {
+            // Handle any other unexpected errors
             throw new SyncopateApiException(
                 'Unexpected error communicating with SyncopateDB API: ' . $e->getMessage(),
                 0,
@@ -351,24 +420,19 @@ class SyncopateClient
      */
     private function processStreamedResponse(ResponseInterface $response): array
     {
-        // Stream processing is better for large responses
-        $contentLength = $response->getHeaders(false)['content-length'][0] ?? 0;
-        if ((int)$contentLength > self::RESPONSE_CHUNK_SIZE) {
-            return $this->streamResponse($response);
-        }
+            // Stream processing is better for large responses
+            $contentLength = (int)($response->getHeaders(false)['content-length'][0] ?? 0);
 
-        // For smaller responses, standard processing is fine
-        try {
-            return $response->toArray(false);
-        } catch (\Throwable $e) {
-            throw new SyncopateApiException(
-                'Failed to parse response: ' . $e->getMessage(),
-                0,
-                $e
-            );
-        }
+            // Process the response based on size
+            $responseData = $contentLength > self::RESPONSE_CHUNK_SIZE
+                ? $this->streamResponse($response)
+                : $response->toArray(false);
+
+            // Validate the response
+            $this->checkForErrors($responseData);
+
+            return $responseData;
     }
-
     /**
      * Stream large response to prevent memory issues
      */
@@ -417,7 +481,32 @@ class SyncopateClient
     {
         try {
             // For error responses, they're typically small so we can use toArray
-            return $response->toArray(false);
+            $data = $response->toArray(false);
+
+            // Additional processing for unique constraint violations
+            // SyncopateDB returns 409 Conflict for unique constraint violations
+            if ($response->getStatusCode() === 409) {
+                // Extract field and value information if available
+                $errorMessage = $data['message'] ?? '';
+
+                // Try to extract field name and value from error message if not explicitly provided
+                if (!isset($data['details']) || !isset($data['details']['field'])) {
+                    // Look for patterns like "field 'email' with value 'test@example.com' already exists"
+                    if (preg_match('/field [\'"]([^\'"]*)[\'"]\s+with\s+value\s+[\'"]([^\'"]*)[\'"]/', $errorMessage, $matches)) {
+                        $data['details'] = $data['details'] ?? [];
+                        $data['details']['field'] = $matches[1];
+                        $data['details']['value'] = $matches[2];
+                    }
+                    // Other common patterns can be added here
+                }
+
+                // Set code if not present
+                if (!isset($data['code'])) {
+                    $data['code'] = 409;
+                }
+            }
+
+            return $data;
         } catch (\Throwable $e) {
             return [
                 'message' => 'Could not parse error response: ' . $e->getMessage(),
@@ -425,7 +514,6 @@ class SyncopateClient
             ];
         }
     }
-
     /**
      * Execute a count query
      */
@@ -506,4 +594,108 @@ class SyncopateClient
 
         return $curlCommand;
     }
+
+    /**
+     * Check for errors in the API response and throw appropriate exceptions
+     *
+     * @param array $responseData The response data from the API
+     * @throws SyncopateApiException
+     * @throws SyncopateIntegrityConstraintException
+     * @throws SyncopateValidationException
+     */
+    private function checkForErrors(array $responseData): void
+    {
+        // Quick return if no error indicators present
+        if (!isset($responseData['error']) && !isset($responseData['db_code']) &&
+            (!isset($responseData['code']) || $responseData['code'] < 400)) {
+            return;
+        }
+
+        $errorMessage = $responseData['message'] ?? 'Unknown error';
+        $httpCode = $responseData['code'] ?? 500;
+        $dbCode = $responseData['db_code'] ?? null;
+
+        // Handle specific DB error codes
+        if ($dbCode !== null) {
+            // Entity validation errors
+            if (in_array($dbCode, ['SY203', 'SY206', 'SY207', 'SY208'])) {
+                throw SyncopateValidationException::createFromApiResponse($responseData);
+            }
+
+            // Unique constraint violations
+            if ($dbCode === 'SY209') {
+                throw SyncopateIntegrityConstraintException::createFromApiResponse($responseData);
+            }
+        }
+
+        // Check for implied constraint violations
+        if ($httpCode === 409 && (
+            stripos($errorMessage, 'unique') !== false ||
+            stripos($errorMessage, 'duplicate') !== false ||
+            stripos($errorMessage, 'constraint') !== false
+        )) {
+            throw SyncopateIntegrityConstraintException::createFromApiResponse($responseData);
+        }
+
+        // Check for implied validation errors
+        if ($httpCode === 400 && (
+            stripos($errorMessage, 'validation') !== false ||
+            stripos($errorMessage, 'invalid') !== false ||
+            stripos($errorMessage, 'required') !== false
+        ) && !in_array($dbCode, ['SY100', 'SY101', 'SY102'])) { // Skip entity type errors
+            throw SyncopateValidationException::createFromApiResponse($responseData);
+        }
+
+        // Default case: throw general API exception
+        throw new SyncopateApiException(
+            $errorMessage,
+            $httpCode,
+            null,
+            $responseData
+        );
+    }
+
+    /**
+     * Validate request data before sending to prevent common errors
+     *
+     * @param array $data The request data to validate
+     * @throws SyncopateValidationException If validation fails
+     */
+    private function validateRequestData(array $data): void
+    {
+        $issues = [];
+
+        // Check for potential issues with data
+        foreach ($data as $key => $value) {
+            // Check for non-UTF8 strings that might cause JSON encoding issues
+            if (is_string($value) && !mb_check_encoding($value, 'UTF-8')) {
+                $issues[$key] = 'Contains non-UTF8 characters that may cause encoding issues';
+            }
+
+            // Check for resource values that can't be serialized
+            if (is_resource($value)) {
+                $issues[$key] = 'Contains a resource that cannot be serialized';
+            }
+
+            // Recursively check nested arrays
+            if (is_array($value)) {
+                try {
+                    $this->validateRequestData($value);
+                } catch (SyncopateValidationException $e) {
+                    foreach ($e->getViolations() as $nestedKey => $message) {
+                        $issues["$key.$nestedKey"] = $message;
+                    }
+                }
+            }
+        }
+
+        if (!empty($issues)) {
+            $exception = SyncopateValidationException::create('Request data validation failed');
+            foreach ($issues as $key => $message) {
+                $exception->addViolation($key, $message);
+            }
+            throw $exception;
+        }
+    }
+
 }
