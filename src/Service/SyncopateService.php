@@ -1029,5 +1029,42 @@ class SyncopateService
             );
         }
     }
+    /**
+     * Truncate all entities of a specific type
+     */
+    public function truncateEntityType(string $entityClass): bool
+    {
+        // Get entity type from entity class
+        $entityType = $this->entityTypeRegistry->getEntityType($entityClass);
 
+        if ($entityType === null) {
+            throw new \InvalidArgumentException("Class $entityClass is not registered as an entity");
+        }
+
+        // Truncate entity type in SyncopateDB
+        $response = $this->client->truncateEntityType($entityType);
+        $this->validateResponse($response);
+
+        return isset($response['success']) && $response['success'] === true;
+    }
+
+    /**
+     * Truncate the entire database
+     */
+    public function truncateDatabase(): bool
+    {
+        // Truncate the entire database in SyncopateDB
+        $response = $this->client->truncateDatabase();
+        $this->validateResponse($response);
+
+        return isset($response['success']) && $response['success'] === true;
+    }
+
+    /**
+     * Get all entity types from the database
+     */
+    public function getAllEntityTypes(): array
+    {
+        return $this->client->getEntityTypes();
+    }
 }

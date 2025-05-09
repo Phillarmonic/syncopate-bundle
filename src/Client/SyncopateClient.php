@@ -139,6 +139,22 @@ class SyncopateClient
     }
 
     /**
+     * Truncate all entities of a specific type.
+     */
+    public function truncateEntityType(string $type): array
+    {
+        return $this->request('POST', "/api/v1/entities/$type/truncate");
+    }
+
+    /**
+     * Truncate the entire database (all entity types).
+     */
+    public function truncateDatabase(): array
+    {
+        return $this->request('POST', "/api/v1/database/truncate");
+    }
+
+    /**
      * Execute a query with type checking.
      */
     public function query(array $queryOptions): array
