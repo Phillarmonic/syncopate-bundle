@@ -1030,4 +1030,57 @@ class SyncopateService
         }
     }
 
+    /**
+     * Truncate all entities of a specific type
+     *
+     * @return array Response data with entities_removed, message, and type keys
+     */
+    public function truncateEntityType(string $entityClass): array
+    {
+        // Get entity type from entity class
+        $entityType = $this->entityTypeRegistry->getEntityType($entityClass);
+
+        if ($entityType === null) {
+            throw new \InvalidArgumentException("Class $entityClass is not registered as an entity");
+        }
+
+        // Truncate entity type in SyncopateDB
+        $response = $this->client->truncateEntityType($entityType);
+        $this->validateResponse($response);
+
+        // Return the full response array for more detailed information
+        return [
+            'entities_removed' => $response['entities_removed'] ?? 0,
+            'message' => $response['message'] ?? "Successfully truncated entity type '$entityType'",
+            'type' => $response['type'] ?? $entityType
+        ];
+    }
+
+   /**
+     * Truncate the entire database
+     *
+     * @return array Response data with entities_removed, message, and other keys
+     */
+    public function truncateDatabase(): array
+    {
+        // Truncate the entire database in SyncopateDB
+        $response = $this->client->truncateDatabase();
+        $this->validateResponse($response);
+
+        // Return the full response array for more detailed information
+        return [
+            'entities_removed' => $response['entities_removed'] ?? 0,
+            'entity_types_truncated' => $response['entity_types_truncated'] ?? 0,
+            'message' => $response['message'] ?? "Successfully truncated the entire database",
+        ];
+    }
+
+    /**
+     * Get all entity types from the database
+     */
+    public function getAllEntityTypes(): array
+    {
+        return $this->client->getEntityTypes();
+    }
+
 }

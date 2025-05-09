@@ -109,6 +109,19 @@ services:
         tags:
             - { name: console.command }
 
+    Phillarmonic\SyncopateBundle\Command\TruncateEntityCommand:
+        arguments:
+            $entityTypeRegistry: '@Phillarmonic\SyncopateBundle\Service\EntityTypeRegistry'
+            $syncopateService: '@Phillarmonic\SyncopateBundle\Service\SyncopateService'
+        tags:
+            - { name: console.command }
+
+    Phillarmonic\SyncopateBundle\Command\TruncateDatabaseCommand:
+        arguments:
+            $syncopateService: '@Phillarmonic\SyncopateBundle\Service\SyncopateService'
+        tags:
+            - { name: console.command }
+
     Phillarmonic\SyncopateBundle\Metadata\RelationshipMetadata:
         public: false
         shared: false  # Create new instance each time to avoid memory issues
