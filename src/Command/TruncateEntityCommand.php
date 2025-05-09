@@ -116,10 +116,13 @@ class TruncateEntityCommand extends Command
         try {
             $io->section(sprintf('Truncating entity type "%s"...', $entityType));
 
-            $success = $this->syncopateService->truncateEntityType($entityClass);
+            $result = $this->syncopateService->truncateEntityType($entityClass);
 
-            if ($success) {
-                $io->success(sprintf('Successfully truncated all entities of type "%s"', $entityType));
+            if (isset($result['message'])) {
+                $io->success([
+                    $result['message'],
+                    sprintf('Entities removed: %d', $result['entities_removed'])
+                ]);
                 return Command::SUCCESS;
             } else {
                 $io->error('Truncation operation failed.');

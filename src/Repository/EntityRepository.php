@@ -208,4 +208,13 @@ class EntityRepository
         $reflection->setAccessible(true);
         return $reflection->getValue($this->syncopateService);
     }
+    /**
+     * Truncate all entities of this entity type
+     *
+     * @return array Response data with entities_removed, message, and type keys
+     */
+    public function truncate(): array
+    {
+        return $this->syncopateService->truncateEntityType($this->entityClass);
+    }
 }

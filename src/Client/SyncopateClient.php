@@ -148,10 +148,12 @@ class SyncopateClient
 
     /**
      * Truncate the entire database (all entity types).
+     *
+     * @return array Response containing entities_removed, entity_types_truncated, and message
      */
     public function truncateDatabase(): array
     {
-        return $this->request('POST', "/api/v1/database/truncate");
+        return $this->request('POST', "/api/v1/database/truncate", ['json' => []]);
     }
 
     /**

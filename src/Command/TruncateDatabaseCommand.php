@@ -88,10 +88,14 @@ class TruncateDatabaseCommand extends Command
         // Execute database truncation
         try {
             $io->section('Truncating entire database...');
-            $success = $this->syncopateService->truncateDatabase();
+            $result = $this->syncopateService->truncateDatabase();
 
-            if ($success) {
-                $io->success('Successfully truncated the entire database.');
+            if (isset($result['message'])) {
+                $io->success([
+                    $result['message'],
+                    sprintf('Entities removed: %d', $result['entities_removed']),
+                    sprintf('Entity types truncated: %d', $result['entity_types_truncated'] ?? 0)
+                ]);
                 return Command::SUCCESS;
             } else {
                 $io->error('Database truncation operation failed.');

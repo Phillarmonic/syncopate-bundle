@@ -1029,10 +1029,13 @@ class SyncopateService
             );
         }
     }
+
     /**
      * Truncate all entities of a specific type
+     *
+     * @return array Response data with entities_removed, message, and type keys
      */
-    public function truncateEntityType(string $entityClass): bool
+    public function truncateEntityType(string $entityClass): array
     {
         // Get entity type from entity class
         $entityType = $this->entityTypeRegistry->getEntityType($entityClass);
@@ -1045,19 +1048,31 @@ class SyncopateService
         $response = $this->client->truncateEntityType($entityType);
         $this->validateResponse($response);
 
-        return isset($response['success']) && $response['success'] === true;
+        // Return the full response array for more detailed information
+        return [
+            'entities_removed' => $response['entities_removed'] ?? 0,
+            'message' => $response['message'] ?? "Successfully truncated entity type '$entityType'",
+            'type' => $response['type'] ?? $entityType
+        ];
     }
 
-    /**
+   /**
      * Truncate the entire database
+     *
+     * @return array Response data with entities_removed, message, and other keys
      */
-    public function truncateDatabase(): bool
+    public function truncateDatabase(): array
     {
         // Truncate the entire database in SyncopateDB
         $response = $this->client->truncateDatabase();
         $this->validateResponse($response);
 
-        return isset($response['success']) && $response['success'] === true;
+        // Return the full response array for more detailed information
+        return [
+            'entities_removed' => $response['entities_removed'] ?? 0,
+            'entity_types_truncated' => $response['entity_types_truncated'] ?? 0,
+            'message' => $response['message'] ?? "Successfully truncated the entire database",
+        ];
     }
 
     /**
@@ -1067,4 +1082,5 @@ class SyncopateService
     {
         return $this->client->getEntityTypes();
     }
+
 }
